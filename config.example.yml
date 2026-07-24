@@ -1,0 +1,42 @@
+# このファイルは公開用の見本です。
+# 実際には config.yml へコピーし、config.yml だけを編集してください。
+
+owner:
+  minecraft_id: "YourMinecraftID"
+
+minecraft:
+  # https://aka.ms/MinecraftEULA を確認し、同意する場合だけtrueにします。
+  accept_eula: false
+
+paths:
+  server_root: "${HOME}/minecraftServer"
+
+defaults:
+  minecraft_version: "26.2"
+  java_memory: "8G"
+  timezone: "Asia/Tokyo"
+  max_players: 8
+  online_mode: true
+  enable_command_block: true
+  allow_flight: true
+  spawn_protection: 0
+  host_port: 25565
+
+access:
+  whitelist_enabled: true
+  whitelist_template: "Group1"
+  ops_enabled: true
+  ops_template: "owner"
+
+playit:
+  enabled: false
+  secret_key: ""
+  image: "ghcr.io/playit-cloud/playit-agent:0.17"
+
+docker:
+  # auto: Minecraftのバージョンから java25 / java21 / java17 を選択
+  # 固定する場合: java25 など
+  java_image_tag: "auto"
+
+resource_pack:
+  enforce: true

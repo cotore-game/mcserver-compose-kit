@@ -1,0 +1,46 @@
+# これは生成例です。通常はnew-minecraft-server.shがサーバーごとに生成します。
+services:
+  minecraft:
+    image: itzg/minecraft-server:java25
+    container_name: "minecraft-${SERVER_ID}"
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+
+    ports:
+      - "127.0.0.1:25565:25565"
+
+    environment:
+      EULA: "TRUE"
+      TYPE: "VANILLA"
+      VERSION: "${MC_VERSION}"
+      MEMORY: "${MC_MEMORY}"
+      TZ: "Asia/Tokyo"
+
+      LEVEL: "world"
+      ONLINE_MODE: "TRUE"
+      WHITELIST: "${MC_WHITELIST}"
+      ENFORCE_WHITELIST: "TRUE"
+      OPS: "${MC_OPS}"
+
+      ENABLE_COMMAND_BLOCK: "TRUE"
+      ALLOW_FLIGHT: "TRUE"
+      SPAWN_PROTECTION: "0"
+      MAX_PLAYERS: "8"
+      MOTD: "${MC_MOTD}"
+
+    volumes:
+      - ./data:/data
+
+  playit:
+    image: ghcr.io/playit-cloud/playit-agent:0.17
+    container_name: "playit-${SERVER_ID}"
+    restart: unless-stopped
+    network_mode: "service:minecraft"
+
+    depends_on:
+      minecraft:
+        condition: service_healthy
+
+    environment:
+      SECRET_KEY: "${PLAYIT_SECRET_KEY}"

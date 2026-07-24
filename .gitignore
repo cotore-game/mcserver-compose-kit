@@ -1,0 +1,17 @@
+# 実設定・秘密情報
+config.yml
+*.local.yml
+.env
+
+# Windowsからコピーした際に生じるメタデータ
+*:Zone.Identifier
+
+# エディタ・OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 一時ファイル
+*.tmp
+*.bak

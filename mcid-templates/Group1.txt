@@ -1,0 +1,4 @@
+# グループ1の例
+${OWNER}
+PlayerName1
+PlayerName2

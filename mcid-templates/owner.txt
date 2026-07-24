@@ -1,0 +1,2 @@
+# config.yml の owner.minecraft_id に展開されます。
+${OWNER}
