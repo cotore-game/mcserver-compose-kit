@@ -188,6 +188,8 @@ yaml_get() {
 
 expand_path() {
   local value="$1"
+  # This is a literal input prefix, not shell tilde expansion.
+  # shellcheck disable=SC2088
   local tilde_prefix='~/'
   value="${value//\$\{HOME\}/$HOME}"
   if [[ "${value:0:2}" == "$tilde_prefix" ]]; then
