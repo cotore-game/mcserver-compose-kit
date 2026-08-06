@@ -14,6 +14,8 @@ paths:
 defaults:
   minecraft_version: "26.2"
   java_memory: "8G"
+  # trueなら、作成確認でEnterを押したときにそのまま起動します。
+  start_after_creation: false
   timezone: "Asia/Tokyo"
   max_players: 8
   online_mode: true
@@ -40,3 +42,8 @@ docker:
 
 resource_pack:
   enforce: true
+
+ui:
+  # WSLからWindows標準のファイル選択・日本語MOTD入力画面を開きます。
+  # 利用できない環境では自動的にターミナル入力へ戻ります。
+  windows_dialogs: true

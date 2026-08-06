@@ -7,11 +7,17 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${MCSERVER_KIT_CONFIG:-${SCRIPT_DIR}/config.yml}"
 CONFIG_EXAMPLE="${SCRIPT_DIR}/config.example.yml"
-MCID_TEMPLATE_DIR="${SCRIPT_DIR}/mcid-templates"
+MCID_TEMPLATE_DIR="${MCSERVER_KIT_MCID_TEMPLATE_DIR:-${SCRIPT_DIR}/mcid-templates}"
+VERSION_DETECTOR="${SCRIPT_DIR}/scripts/detect-world-version.py"
+WINDOWS_DIALOG="${SCRIPT_DIR}/scripts/windows-dialog.ps1"
 
 die() {
   printf 'エラー: %s\n' "$*" >&2
   exit 1
+}
+
+log_step() {
+  printf '\n[%s] %s\n' "$1" "$2" >&2
 }
 
 trim() {
@@ -35,6 +41,38 @@ prompt() {
   fi
 }
 
+windows_dialog_available() {
+  [[ "${windows_dialogs_enabled:-true}" == 'true' ]] || return 1
+  command -v wslpath >/dev/null 2>&1 || return 1
+  [[ -x /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe ]] || return 1
+  [[ -f "$WINDOWS_DIALOG" ]]
+}
+
+run_windows_dialog() {
+  local mode="$1"
+  local default_value="${2-}"
+  local dialog_path
+  local encoded
+
+  dialog_path="$(wslpath -w "$WINDOWS_DIALOG")"
+  encoded="$(/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe \
+    -NoProfile -ExecutionPolicy Bypass -File "$dialog_path" \
+    -Mode "$mode" -DefaultValue "$default_value" 2>/dev/null)" || return 1
+  encoded="${encoded//$'\r'/}"
+  printf '%s' "$encoded" | base64 --decode
+}
+
+prompt_server_name() {
+  local default_value="$1"
+  local result
+
+  if windows_dialog_available && result="$(run_windows_dialog InputMotd "$default_value")"; then
+    printf '%s' "$result"
+    return
+  fi
+  prompt '表示名/MOTD' "$default_value"
+}
+
 prompt_bool() {
   local message="$1"
   local default_value="$2"
@@ -47,20 +85,24 @@ prompt_bool() {
     hint='y/N'
   fi
 
-  read -r -p "${message} [${hint}]: " answer
-  answer="${answer:-$default_value}"
+  while true; do
+    read -r -p "${message} [${hint}]: " answer
+    answer="${answer:-$default_value}"
 
-  case "${answer,,}" in
-    y | yes | true | on | 1)
-      printf 'true'
-      ;;
-    n | no | false | off | 0)
-      printf 'false'
-      ;;
-    *)
-      die "${message}には y または n を入力してください"
-      ;;
-  esac
+    case "${answer,,}" in
+      y | yes | true | on | 1)
+        printf 'true'
+        return
+        ;;
+      n | no | false | off | 0)
+        printf 'false'
+        return
+        ;;
+      *)
+        printf '入力エラー: y または n を入力してください。\n' >&2
+        ;;
+    esac
+  done
 }
 
 is_true() {
@@ -173,7 +215,88 @@ normalize_memory() {
     return
   fi
 
-  die "メモリは 8、8G、8192M のように指定してください"
+  return 1
+}
+
+windows_to_wsl_path() {
+  local value
+  local drive
+
+  value="$(trim "$1")"
+  value="${value%\"}"
+  value="${value#\"}"
+  value="${value%\'}"
+  value="${value#\'}"
+  value="${value//\\//}"
+
+  if [[ "$value" =~ ^([A-Za-z]):(/.*)?$ ]]; then
+    drive="${BASH_REMATCH[1],,}"
+    value="/mnt/${drive}${BASH_REMATCH[2]}"
+  fi
+
+  expand_path "$value"
+}
+
+find_world_roots() {
+  local search_root="$1"
+
+  if [[ -f "${search_root}/level.dat" ]]; then
+    printf '%s\0' "$search_root"
+    return
+  fi
+
+  [[ -d "$search_root" ]] || return
+  find "$search_root" -mindepth 2 -maxdepth 7 -type f -name level.dat -printf '%h\0' 2>/dev/null
+}
+resolve_world_source() {
+  local input_path="$1" converted parent name candidate
+  local candidates=() roots=()
+  converted="$(windows_to_wsl_path "$input_path")"
+  if [[ -f "$converted" && "${converted,,}" == *.zip ]]; then printf '%s' "$converted"; return; fi
+  if [[ -d "$converted" ]]; then
+    mapfile -d '' roots < <(find_world_roots "$converted")
+  elif [[ ! -e "$converted" ]]; then
+    parent="$(dirname -- "$converted")"; name="$(basename -- "$converted")"
+    if [[ -d "$parent" && -n "$name" ]]; then
+      mapfile -d '' candidates < <(find "$parent" -mindepth 1 -maxdepth 1 \( -type d -o -type f \) -name "${name}*" -print0 2>/dev/null)
+      for candidate in "${candidates[@]}"; do
+        if [[ -f "$candidate" && "${candidate,,}" == *.zip ]]; then roots+=("$candidate")
+        elif [[ -d "$candidate" ]]; then mapfile -d '' -O "${#roots[@]}" roots < <(find_world_roots "$candidate"); fi
+      done
+    fi
+  fi
+  if [[ "${#roots[@]}" -eq 1 ]]; then printf '%s' "${roots[0]}"; return; fi
+  if [[ "${#roots[@]}" -gt 1 ]]; then
+    printf '入力エラー: ワールド候補が複数見つかりました。次のいずれかを直接指定してください:\n' >&2; printf '  %s\n' "${roots[@]}" >&2
+  else printf '入力エラー: level.datを含むワールドまたはZIPが見つかりません: %s\n' "$converted" >&2; fi
+  return 1
+}
+prompt_world_source() {
+  local answer=''
+  local resolved
+
+  while true; do
+    if windows_dialog_available; then
+      printf 'Windowsの選択画面を開いています。画面の手前に表示されない場合はタスクバーを確認してください。\n' >&2
+      answer="$(run_windows_dialog SelectWorld)" || answer=''
+    fi
+    if [[ -z "$answer" ]]; then
+      answer="$(prompt '配布ワールドのフォルダまたはZIP（Windowsパスも可）')"
+    fi
+    if resolved="$(resolve_world_source "$answer")"; then
+      printf 'ワールドを検出しました: %s\n' "$resolved" >&2
+      printf '%s' "$resolved"
+      return
+    fi
+  done
+}
+
+detect_world_version() {
+  local source_path="$1"
+
+  [[ -f "$VERSION_DETECTOR" ]] || return 1
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 "$VERSION_DETECTOR" "$source_path"
 }
 
 resolve_minecraft_image() {
@@ -190,10 +313,10 @@ resolve_minecraft_image() {
     LATEST | 26.*)
       java_tag='java25'
       ;;
-    1.21.* | 1.20.[5-9]*)
+    1.21 | 1.21.* | 1.20.[5-9] | 1.20.[5-9].*)
       java_tag='java21'
       ;;
-    1.18.* | 1.19.* | 1.20.[0-4]*)
+    1.18 | 1.18.* | 1.19 | 1.19.* | 1.20 | 1.20.[0-4] | 1.20.[0-4].*)
       java_tag='java17'
       ;;
     *)
@@ -292,6 +415,7 @@ copy_world() {
   die "level.datを含むワールドフォルダ、またはZIPを指定してください"
 }
 
+main() {
 [[ -f "$CONFIG_FILE" ]] || {
   printf '%s\n' \
     "設定ファイルがありません: ${CONFIG_FILE}" \
@@ -315,6 +439,7 @@ is_true "$accept_eula" ||
 server_root="$(expand_path "$(yaml_get 'paths.server_root' '${HOME}/minecraftServer')")"
 default_version="$(yaml_get 'defaults.minecraft_version' '26.2')"
 default_memory="$(yaml_get 'defaults.java_memory' '8G')"
+default_start_after_creation="$(yaml_get 'defaults.start_after_creation' 'false')"
 timezone="$(yaml_get 'defaults.timezone' 'Asia/Tokyo')"
 max_players="$(yaml_get 'defaults.max_players' '8')"
 online_mode="$(yaml_get 'defaults.online_mode' 'true')"
@@ -331,6 +456,7 @@ playit_secret_key="$(yaml_get 'playit.secret_key')"
 playit_image="$(yaml_get 'playit.image' 'ghcr.io/playit-cloud/playit-agent:0.17')"
 java_image_tag="$(yaml_get 'docker.java_image_tag' 'auto')"
 resource_pack_enforce="$(yaml_get 'resource_pack.enforce' 'true')"
+windows_dialogs_enabled="$(yaml_get 'ui.windows_dialogs' 'true')"
 
 printf '%s\n' \
   'Minecraft Java 配布ワールド用サーバー作成' \
@@ -340,18 +466,50 @@ printf '%s\n' \
   '既存サーバーは変更せず、新しいフォルダを作成します。' \
   ''
 
-server_id="$(prompt 'サーバーID（英小文字・数字・ハイフン）')"
-[[ "$server_id" =~ ^[a-z0-9][a-z0-9-]*$ ]] ||
-  die "サーバーIDは英小文字・数字・ハイフンだけにしてください"
+while true; do
+  server_id="$(prompt 'サーバーID（英小文字・数字・ハイフン）')"
+  if [[ ! "$server_id" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+    printf '入力エラー: 英小文字・数字・ハイフンだけにしてください。\n' >&2
+    continue
+  fi
+  target="${server_root}/${server_id}"
+  if [[ -e "$target" ]]; then
+    printf '入力エラー: 作成先が既に存在します: %s\n' "$target" >&2
+    continue
+  fi
+  break
+done
 
-server_name="$(prompt '表示名/MOTD' "$server_id")"
-version="$(prompt 'Minecraftバージョン（例: 26.2 / 1.21.2）' "$default_version")"
-[[ "$version" =~ ^[0-9]+([.][0-9]+){1,2}$ || "$version" == "LATEST" ]] ||
-  die "バージョンは26.2、1.21.2、LATESTのように指定してください"
+server_name="$(prompt_server_name "$server_id")"
+world_source="$(prompt_world_source)"
 
-memory="$(normalize_memory "$(prompt 'Javaメモリ（8 / 8G / 8192M）' "$default_memory")")"
-minecraft_image="$(resolve_minecraft_image "$version" "$java_image_tag")"
-world_source="$(prompt '配布ワールドのルートフォルダまたはZIP（level.datを含む）')"
+detected_version=""
+log_step '確認' 'ワールドに保存されたMinecraftバージョンを調べています。'
+if detected_version="$(detect_world_version "$world_source" 2>/dev/null)"; then
+  default_version="$detected_version"
+  printf '検出したバージョン: %s（Enterで採用）\n' "$detected_version"
+else
+  printf 'バージョンを自動検出できなかったため、設定値 %s を候補にします。\n' "$default_version"
+fi
+
+while true; do
+  version="$(prompt 'Minecraftバージョン（例: 26.2 / 1.21.2）' "$default_version")"
+  if [[ ! "$version" =~ ^[0-9]+([.][0-9]+){1,2}$ && "$version" != "LATEST" ]]; then
+    printf '入力エラー: 26.2、1.21.2、LATESTのように指定してください。\n' >&2
+    continue
+  fi
+  if minecraft_image="$(resolve_minecraft_image "$version" "$java_image_tag")"; then
+    break
+  fi
+done
+
+while true; do
+  memory_input="$(prompt 'Javaメモリ（8 / 8G / 8192M）' "$default_memory")"
+  if memory="$(normalize_memory "$memory_input")"; then
+    break
+  fi
+  printf '入力エラー: 8、8G、8192Mのように指定してください。\n' >&2
+done
 
 show_mcid_templates
 whitelist_enabled="$(prompt_bool 'ホワイトリストを有効にしますか？' "$default_whitelist_enabled")"
@@ -396,13 +554,19 @@ if is_true "$playit_enabled" && [[ -z "$playit_secret_key" ]]; then
   die "Playitが有効ですが、config.ymlのplayit.secret_keyが空です"
 fi
 
+start_after_creation="$(prompt_bool '作成後すぐにDocker Composeで起動しますか？' "$default_start_after_creation")"
+
 target="${server_root}/${server_id}"
 [[ ! -e "$target" ]] ||
   die "作成先が既に存在します。上書きはしません: ${target}"
 
+log_step '1/5' "作成先を準備しています: ${target}"
 mkdir -p "${target}/data"
+
+log_step '2/5' 'ワールドデータを確認・コピーしています。ZIPの場合は展開に時間がかかることがあります。'
 copy_world "$world_source" "${target}/data/world"
 
+log_step '3/5' '.envとCompose設定を生成しています。'
 {
   printf 'SERVER_ID=%s\n' "$(escape_env_value "$server_id")"
   printf 'MC_VERSION=%s\n' "$(escape_env_value "$version")"
@@ -500,6 +664,7 @@ if is_true "$playit_enabled"; then
 COMPOSE
 fi
 
+log_step '4/5' 'サーバー操作用READMEを生成しています。'
 cat >"${target}/README.txt" <<EOF
 サーバー名: ${server_name}
 Minecraft: ${version}
@@ -527,9 +692,31 @@ Playit: $([[ "$playit_enabled" == 'true' ]] && printf 'あり' || printf 'なし
   同じホストポートを使う別サーバーとは同時起動できません。
 EOF
 
+log_step '5/5' 'Docker Compose設定を検証しています。'
+(
+  cd "$target"
+  docker compose config --quiet
+) || die "Docker Compose設定の検証に失敗しました: ${target}/compose.yaml"
+
 printf '\n作成しました: %s\n\n' "$target"
-printf '%s\n' \
-  'まだサーバーは起動していません。内容を確認してから次を実行してください:' \
-  "  cd \"${target}\"" \
-  '  docker compose config --quiet' \
-  '  docker compose up -d'
+if is_true "$start_after_creation"; then
+  log_step '起動' 'Dockerイメージの取得とサーバー起動を開始します。初回は数分かかることがあります。'
+  (
+    cd "$target"
+    docker compose up -d
+    printf '\n現在のコンテナ状態:\n'
+    docker compose ps
+  ) || die "サーバーの起動に失敗しました。次でログを確認してください: cd \"${target}\" && docker compose logs"
+  printf '\n起動処理が完了しました。Minecraftサーバーの準備完了まではログで確認できます:\n'
+  printf '  cd "%s" && docker compose logs -f minecraft\n' "$target"
+else
+  printf '%s\n' \
+    'サーバーはまだ起動していません。起動する場合は次を実行してください:' \
+    "  cd \"${target}\"" \
+    '  docker compose up -d'
+fi
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
