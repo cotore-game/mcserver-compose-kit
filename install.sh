@@ -98,7 +98,10 @@ main() {
   install -m 644 "${source_dir}/LICENSE" "${INSTALL_DIR}/LICENSE"
   mkdir -p "${INSTALL_DIR}/scripts"
   install -m 755 "${source_dir}/scripts/detect-world-version.py" "${INSTALL_DIR}/scripts/detect-world-version.py"
+  install -m 644 "${source_dir}/scripts/i18n.sh" "${INSTALL_DIR}/scripts/i18n.sh"
   install -m 644 "${source_dir}/scripts/windows-dialog.ps1" "${INSTALL_DIR}/scripts/windows-dialog.ps1"
+  mkdir -p "${INSTALL_DIR}/locales"
+  cp -a "${source_dir}/locales/." "${INSTALL_DIR}/locales/"
 
   if [[ ! -f "${CONFIG_DIR}/config.yml" ]]; then
     install -m 600 "${source_dir}/config.example.yml" "${CONFIG_DIR}/config.yml"

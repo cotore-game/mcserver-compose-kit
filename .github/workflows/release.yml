@@ -23,7 +23,8 @@ jobs:
       - name: Run checks
         run: |
           bash -n mcserver-kit new-minecraft-server.sh setup.sh install.sh uninstall.sh tests/run-tests.sh
-          python3 -m py_compile scripts/detect-world-version.py
+          python3 -m py_compile scripts/detect-world-version.py scripts/validate-locales.py
+          python3 scripts/validate-locales.py
           shellcheck -x mcserver-kit new-minecraft-server.sh setup.sh install.sh uninstall.sh tests/run-tests.sh
           bash tests/run-tests.sh
 
@@ -41,6 +42,7 @@ jobs:
             README.md \
             LICENSE \
             scripts \
+            locales \
             mcid-templates \
             dist/mcserver-compose-kit/
           tar -C dist -czf dist/mcserver-compose-kit.tar.gz mcserver-compose-kit

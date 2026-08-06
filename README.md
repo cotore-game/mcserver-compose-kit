@@ -28,6 +28,27 @@ mcserver-kit uninstall --purge
 mcserver-kit --help
 ```
 
+### Language / 言語
+
+By default, the language is selected from`LANG`（`ja*`は日本語、それ以外は英語）. You can override it for a command:
+
+デフォルトでは`LANG`から言語を選択します（`ja*`は日本語、それ以外は英語）。コマンド単位でも指定できます。
+
+```bash
+mcserver-kit --lang en --help
+mcserver-kit --lang ja setup
+```
+
+Translations are stored in`locales/*.json`. To add a language, copy`locales/en.json`, translate the values without changing the keys, and submit a pull request.
+
+翻訳は`locales/*.json`にあります。言語を追加する場合は`locales/en.json`を複製し、キーを変えずに値を翻訳してPRを作成してください。
+
+```bash
+python3 scripts/validate-locales.py
+```
+
+CI verifies JSON syntax, empty translations, and key parity with the English catalog.
+
 保存先は次のとおりです。
 
 - 本体: `~/.local/share/mcserver-compose-kit`

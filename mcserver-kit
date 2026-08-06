@@ -5,24 +5,42 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 export MCSERVER_KIT_CONFIG="${MCSERVER_KIT_CONFIG:-${HOME}/.config/mcserver-compose-kit/config.yml}"
 export MCSERVER_KIT_MCID_TEMPLATE_DIR="${MCSERVER_KIT_MCID_TEMPLATE_DIR:-${HOME}/.config/mcserver-compose-kit/mcid-templates}"
 
-show_help() {
-  cat <<'HELP'
-mcserver-kit - Minecraft Java配布ワールド用サーバー作成ツール
+if [[ "${1-}" == '--lang' ]]; then
+  [[ -n "${2-}" ]] || {
+    printf '%s\n' '--lang requires a language code.' >&2
+    exit 2
+  }
+  export MCSERVER_KIT_LANG="$2"
+  shift 2
+fi
 
-使い方:
+# shellcheck source=scripts/i18n.sh
+source "${SCRIPT_DIR}/scripts/i18n.sh"
+load_messages
+
+show_help() {
+  printf 'mcserver-kit - %s\n\n' "$(tr cli.description)"
+  tr cli.usage
+  printf '\n'
+  cat <<HELP
   mcserver-kit [create]
   mcserver-kit setup
   mcserver-kit uninstall [--purge]
+  mcserver-kit --lang <code> [command]
   mcserver-kit --help
-
-コマンド:
-  create               対話形式で新しいサーバーを作成します（省略時の動作）
-  setup                Owner、EULA、MCIDテンプレート、Playit等を設定します
-  uninstall            本体を削除し、設定とMCIDテンプレートは保持します
-  uninstall --purge    本体、設定、MCIDテンプレートをすべて削除します
-  help                 このヘルプを表示します
-
-設定:
+HELP
+  printf '\n'
+  tr cli.commands
+  printf '\n'
+  printf '  %-20s %s\n' create "$(tr cli.create)"
+  printf '  %-20s %s\n' setup "$(tr cli.setup)"
+  printf '  %-20s %s\n' uninstall "$(tr cli.uninstall)"
+  printf '  %-20s %s\n' 'uninstall --purge' "$(tr cli.uninstall_purge)"
+  printf '  %-20s %s\n' help "$(tr cli.help)"
+  printf '\n'
+  tr cli.settings
+  printf '\n'
+  cat <<HELP
   ~/.config/mcserver-compose-kit/config.yml
   ~/.config/mcserver-compose-kit/mcid-templates/
 HELP
@@ -46,7 +64,7 @@ case "$command_name" in
     show_help
     ;;
   *)
-    printf '不明なコマンドです: %s\n\n' "$command_name" >&2
+    tr cli.unknown "$command_name" >&2
     show_help >&2
     exit 2
     ;;
