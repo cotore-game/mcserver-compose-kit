@@ -91,6 +91,7 @@ main() {
   install -m 755 "${source_dir}/new-minecraft-server.sh" "${INSTALL_DIR}/new-minecraft-server.sh"
   install -m 755 "${source_dir}/mcserver-kit" "${INSTALL_DIR}/mcserver-kit"
   install -m 755 "${source_dir}/setup.sh" "${INSTALL_DIR}/setup.sh"
+  install -m 755 "${source_dir}/reset.sh" "${INSTALL_DIR}/reset.sh"
   install -m 755 "${source_dir}/uninstall.sh" "${INSTALL_DIR}/uninstall.sh"
   install -m 644 "${source_dir}/config.example.yml" "${INSTALL_DIR}/config.example.yml"
   install -m 644 "${source_dir}/compose-example.yaml" "${INSTALL_DIR}/compose-example.yaml"

@@ -4,6 +4,7 @@
   "cli.commands": "Commands:",
   "cli.create": "Create a new server interactively (default command)",
   "cli.setup": "Configure Owner, EULA, MCID templates, Playit, and defaults",
+  "cli.reset": "Delete settings and MCID templates but keep servers and the program",
   "cli.uninstall": "Remove the program but keep settings and MCID templates",
   "cli.uninstall_purge": "Remove the program, settings, and MCID templates",
   "cli.help": "Show this help",
@@ -31,5 +32,11 @@
   "input.yes_no": "Please enter y or n.\n",
   "input.mcid": "MCID",
   "input.mcid_rules": "MCID must be 3–16 letters, numbers, or underscores.\n",
-  "input.one_per_line": "Enter one per line and press Enter on an empty line to finish.\n"
+  "input.one_per_line": "Enter one per line and press Enter on an empty line to finish.\n",
+  "reset.usage": "Usage: mcserver-kit reset [--yes]\n",
+  "reset.unsafe": "Refusing to reset an unsafe path.\n",
+  "reset.summary": "The following settings will be deleted:\n  %s\n  %s\nCreated servers, worlds, and the installed program will not be deleted.\n",
+  "reset.confirm": "Continue? [y/N]: ",
+  "reset.cancelled": "Reset cancelled.\n",
+  "reset.done": "Settings and MCID templates were deleted. Run mcserver-kit setup to configure them again.\n"
 }
