@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# `tr` is the repository translation helper; literal ${HOME} is stored in config.
+# shellcheck disable=SC2016,SC2020,SC2119
 set -Eeuo pipefail
 
 CONFIG_FILE="${MCSERVER_KIT_CONFIG:-${HOME}/.config/mcserver-compose-kit/config.yml}"
