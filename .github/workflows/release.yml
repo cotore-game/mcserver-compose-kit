@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'v*'
@@ -46,7 +47,16 @@ jobs:
           cd dist
           sha256sum mcserver-compose-kit.tar.gz > mcserver-compose-kit.tar.gz.sha256
 
+      - name: Upload release archive for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcserver-compose-kit-release
+          path: |
+            dist/mcserver-compose-kit.tar.gz
+            dist/mcserver-compose-kit.tar.gz.sha256
+
       - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
