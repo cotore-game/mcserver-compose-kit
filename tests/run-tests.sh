@@ -3,6 +3,8 @@ set -Eeuo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=../new-minecraft-server.sh
+# The computed repository path is intentional.
+# shellcheck disable=SC1091
 source "${REPO_ROOT}/new-minecraft-server.sh"
 
 tests_run=0
@@ -48,6 +50,8 @@ test_version_resolution() {
   assert_equal 'itzg/minecraft-server:java25' "$(resolve_minecraft_image '26.2' auto)" '26.2 uses Java 25'
   assert_equal 'itzg/minecraft-server:java25' "$(resolve_minecraft_image 'LATEST' auto)" 'LATEST uses Java 25'
   assert_equal 'itzg/minecraft-server:java-custom' "$(resolve_minecraft_image '1.21' java-custom)" 'configured image tag overrides auto detection'
+  # The single-quoted script is intentional so the child shell expands $1.
+  # shellcheck disable=SC2016
   assert_fails 'unknown versions are rejected in auto mode' \
     bash -c 'source "$1"; resolve_minecraft_image "1.17.1" auto' _ "${REPO_ROOT}/new-minecraft-server.sh"
 }

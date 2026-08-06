@@ -188,8 +188,11 @@ yaml_get() {
 
 expand_path() {
   local value="$1"
+  # This is a literal input prefix, not shell tilde expansion.
+  # shellcheck disable=SC2088
+  local tilde_prefix='~/'
   value="${value//\$\{HOME\}/$HOME}"
-  if [[ "$value" == "~/"* ]]; then
+  if [[ "${value:0:2}" == "$tilde_prefix" ]]; then
     value="${HOME}/${value#\~/}"
   fi
   printf '%s' "$value"
@@ -352,7 +355,7 @@ load_mcid_template() {
     line="$(trim "$line")"
     [[ -z "$line" ]] && continue
 
-    if [[ "$line" == '${OWNER}' ]]; then
+    if [[ "$line" == "\${OWNER}" ]]; then
       line="$owner_mcid"
     fi
 
@@ -436,7 +439,7 @@ accept_eula="$(yaml_get 'minecraft.accept_eula' 'false')"
 is_true "$accept_eula" ||
   die "Minecraft EULAを確認し、同意する場合はconfig.ymlのminecraft.accept_eulaをtrueにしてください"
 
-server_root="$(expand_path "$(yaml_get 'paths.server_root' '${HOME}/minecraftServer')")"
+server_root="$(expand_path "$(yaml_get 'paths.server_root' "\${HOME}/minecraftServer")")"
 default_version="$(yaml_get 'defaults.minecraft_version' '26.2')"
 default_memory="$(yaml_get 'defaults.java_memory' '8G')"
 default_start_after_creation="$(yaml_get 'defaults.start_after_creation' 'false')"

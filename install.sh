@@ -5,7 +5,9 @@ REPOSITORY='cotore-game/mcserver-compose-kit'
 INSTALL_DIR="${MCSERVER_KIT_INSTALL_DIR:-${HOME}/.local/share/mcserver-compose-kit}"
 CONFIG_DIR="${MCSERVER_KIT_CONFIG_DIR:-${HOME}/.config/mcserver-compose-kit}"
 BIN_DIR="${MCSERVER_KIT_BIN_DIR:-${HOME}/.local/bin}"
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+if ! SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"; then
+  SCRIPT_DIR=''
+fi
 TEMP_DIR=''
 
 cleanup() {
@@ -122,7 +124,7 @@ LAUNCHER
   printf '起動コマンド: mcserver-kit\n'
   if [[ ":$PATH:" != *":${BIN_DIR}:"* ]]; then
     printf '\n%s がPATHにありません。次をシェル設定へ追加してください:\n' "$BIN_DIR"
-    printf '  export PATH="$HOME/.local/bin:$PATH"\n'
+    printf '%s\n' "  export PATH=\"\$HOME/.local/bin:\$PATH\""
   fi
   printf '\n初回起動前に、設定ファイルのEULA同意とMinecraft IDを編集してください。\n'
 

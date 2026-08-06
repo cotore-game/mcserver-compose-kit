@@ -123,15 +123,15 @@ main() {
   default_memory="$(prompt 'Javaメモリ' '8G')"
   start_after_creation="$(prompt_bool '作成後すぐ起動する設定をデフォルトにしますか？' false)"
   windows_dialogs="$(prompt_bool 'Windowsのファイル選択・MOTD入力画面を使いますか？' true)"
-  server_root="$(prompt 'サーバー作成先' '${HOME}/minecraftServer')"
+  server_root="$(prompt 'サーバー作成先' "\${HOME}/minecraftServer")"
 
   mkdir -p "$TEMPLATE_DIR" "$(dirname -- "$CONFIG_FILE")"
   {
-    printf '${OWNER}\n'
+    printf '%s\n' "\${OWNER}"
     printf '%s' "$additional_ops"
   } >"${TEMPLATE_DIR}/owner.txt"
   {
-    printf '${OWNER}\n'
+    printf '%s\n' "\${OWNER}"
     printf '%s' "$whitelist_ids"
   } >"${TEMPLATE_DIR}/default.txt"
 

@@ -30,7 +30,7 @@ jobs:
         run: python3 -m py_compile scripts/detect-world-version.py
 
       - name: Run ShellCheck
-        run: shellcheck mcserver-kit new-minecraft-server.sh setup.sh install.sh uninstall.sh tests/run-tests.sh
+        run: shellcheck -x mcserver-kit new-minecraft-server.sh setup.sh install.sh uninstall.sh tests/run-tests.sh
 
       - name: Run specification tests
         run: bash tests/run-tests.sh
