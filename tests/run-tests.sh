@@ -56,6 +56,19 @@ test_version_resolution() {
     bash -c 'source "$1"; resolve_minecraft_image "1.17.1" auto' _ "${REPO_ROOT}/new-minecraft-server.sh"
 }
 
+test_locales() {
+  local english_help
+  local japanese_help
+
+  python3 "${REPO_ROOT}/scripts/validate-locales.py" "${REPO_ROOT}/locales" >/dev/null
+  tests_run=$((tests_run + 1))
+
+  english_help="$(bash "${REPO_ROOT}/mcserver-kit" --lang en --help)"
+  japanese_help="$(bash "${REPO_ROOT}/mcserver-kit" --lang ja --help)"
+  assert_equal 'present' "$(grep -q 'Create a new server interactively' <<<"$english_help" && printf present)" 'English help is loaded from the locale catalog'
+  assert_equal 'present' "$(grep -q '対話形式で新しいサーバーを作成' <<<"$japanese_help" && printf present)" 'Japanese help is loaded from the locale catalog'
+}
+
 test_input_normalization() {
   assert_equal '8G' "$(normalize_memory '8')" 'plain memory values mean GiB'
   assert_equal '8192M' "$(normalize_memory '8192m')" 'memory suffix is normalized'
@@ -211,6 +224,7 @@ test_local_installation() {
   local bin_dir="${temp_dir}/install/bin"
   local fake_bin="${temp_dir}/install/fake-bin"
   local install_log="${temp_dir}/install/install.log"
+  local installed_help
 
   mkdir -p "$fake_bin"
   ln -s /usr/bin/true "${fake_bin}/unzip"
@@ -223,7 +237,8 @@ test_local_installation() {
     bash "${REPO_ROOT}/install.sh" >"$install_log"
 
   assert_equal 'present' "$([[ -x "${bin_dir}/mcserver-kit" ]] && printf present)" 'the installer creates the launcher'
-  assert_equal 'present' "$("${bin_dir}/mcserver-kit" --help | grep -q 'mcserver-kit setup' && printf present)" 'the installed launcher exposes subcommand help'
+  installed_help="$("${bin_dir}/mcserver-kit" --help)"
+  assert_equal 'present' "$(grep -q 'mcserver-kit setup' <<<"$installed_help" && printf present)" 'the installed launcher exposes subcommand help'
   assert_equal 'present' "$([[ -f "${config_dir}/config.yml" ]] && printf present)" 'the installer creates the initial config'
   assert_equal 'present' "$([[ -f "${install_dir}/scripts/windows-dialog.ps1" ]] && printf present)" 'the installer includes the Windows dialog helper'
 
@@ -279,6 +294,7 @@ main() {
   trap cleanup EXIT
 
   test_version_resolution
+  test_locales
   test_input_normalization
   test_world_discovery "$TEST_TEMP_DIR"
   test_saved_version_detection "$TEST_TEMP_DIR"

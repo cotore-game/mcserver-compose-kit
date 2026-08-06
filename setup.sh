@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
+# `tr` is the repository translation helper; literal ${HOME} is stored in config.
+# shellcheck disable=SC2016,SC2020,SC2119
 set -Eeuo pipefail
 
 CONFIG_FILE="${MCSERVER_KIT_CONFIG:-${HOME}/.config/mcserver-compose-kit/config.yml}"
 TEMPLATE_DIR="${MCSERVER_KIT_MCID_TEMPLATE_DIR:-${HOME}/.config/mcserver-compose-kit/mcid-templates}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=scripts/i18n.sh
+source "${SCRIPT_DIR}/scripts/i18n.sh"
+load_messages
 
 prompt() {
   local message="$1"
@@ -37,7 +44,7 @@ prompt_bool() {
         printf false
         return
         ;;
-      *) printf 'yまたはnを入力してください。\n' >&2 ;;
+      *) tr input.yes_no >&2 ;;
     esac
   done
 }
@@ -59,12 +66,12 @@ read_mcid_list() {
   local result=''
 
   printf '%s\n' "$message" >&2
-  printf '1行に1つ入力し、空Enterで終了します。\n' >&2
+  tr input.one_per_line >&2
   while true; do
-    read -r -p 'MCID: ' line
+    read -r -p "$(tr input.mcid): " line
     [[ -n "$line" ]] || break
     if ! validate_mcid "$line"; then
-      printf 'MCIDは英数字と_の3～16文字です。\n' >&2
+      tr input.mcid_rules >&2
       continue
     fi
     result+="${line}"$'\n'
@@ -87,43 +94,41 @@ main() {
   local windows_dialogs
   local server_root
 
-  printf '%s\n' \
-    'Minecraft Server Kit 初回設定' \
-    '--------------------------------'
+  printf '%s\n' "$(tr setup.title)" '--------------------------------'
 
   while true; do
-    owner_mcid="$(prompt 'OwnerのMinecraft ID')"
+    owner_mcid="$(prompt "$(tr setup.owner)")"
     validate_mcid "$owner_mcid" && break
-    printf 'MCIDは英数字と_の3～16文字です。\n' >&2
+    tr input.mcid_rules >&2
   done
 
-  printf 'Minecraft EULA: https://aka.ms/MinecraftEULA\n'
-  accept_eula="$(prompt_bool 'EULAを確認し、同意しますか？' false)"
-  whitelist_enabled="$(prompt_bool 'ホワイトリストを有効にしますか？' true)"
+  tr setup.eula_url
+  accept_eula="$(prompt_bool "$(tr setup.eula_accept)" false)"
+  whitelist_enabled="$(prompt_bool "$(tr setup.whitelist_enable)" true)"
   if [[ "$whitelist_enabled" == 'true' ]]; then
-    whitelist_ids="$(read_mcid_list 'Owner以外にホワイトリストへ追加するMCIDを入力してください。')"
+    whitelist_ids="$(read_mcid_list "$(tr setup.whitelist_ids)")"
   fi
 
-  ops_enabled="$(prompt_bool 'OwnerへOPを自動付与しますか？' true)"
+  ops_enabled="$(prompt_bool "$(tr setup.ops_enable)" true)"
   if [[ "$ops_enabled" == 'true' ]]; then
-    additional_ops="$(read_mcid_list 'Owner以外にOPを付与するMCIDを入力してください。')"
+    additional_ops="$(read_mcid_list "$(tr setup.ops_ids)")"
   fi
 
-  playit_enabled="$(prompt_bool 'Playitを利用しますか？' false)"
+  playit_enabled="$(prompt_bool "$(tr setup.playit_enable)" false)"
   if [[ "$playit_enabled" == 'true' ]]; then
-    read -r -s -p 'Playit Secret Key（入力内容は表示されません）: ' playit_secret
+    read -r -s -p "$(tr setup.playit_secret)" playit_secret
     printf '\n'
     [[ -n "$playit_secret" ]] || {
-      printf 'Playitを有効にする場合はSecret Keyが必要です。\n' >&2
+      tr setup.playit_required >&2
       exit 1
     }
   fi
 
-  default_version="$(prompt '自動検出できない場合のMinecraftバージョン' '26.2')"
-  default_memory="$(prompt 'Javaメモリ' '8G')"
-  start_after_creation="$(prompt_bool '作成後すぐ起動する設定をデフォルトにしますか？' false)"
-  windows_dialogs="$(prompt_bool 'Windowsのファイル選択・MOTD入力画面を使いますか？' true)"
-  server_root="$(prompt 'サーバー作成先' "\${HOME}/minecraftServer")"
+  default_version="$(prompt "$(tr setup.default_version)" '26.2')"
+  default_memory="$(prompt "$(tr setup.memory)" '8G')"
+  start_after_creation="$(prompt_bool "$(tr setup.auto_start)" false)"
+  windows_dialogs="$(prompt_bool "$(tr setup.windows_dialogs)" true)"
+  server_root="$(prompt "$(tr setup.server_root)" '${HOME}/minecraftServer')"
 
   mkdir -p "$TEMPLATE_DIR" "$(dirname -- "$CONFIG_FILE")"
   {
@@ -181,11 +186,11 @@ CONFIG
   chmod 600 "$CONFIG_FILE"
   chmod 600 "${TEMPLATE_DIR}/owner.txt" "${TEMPLATE_DIR}/default.txt"
 
-  printf '\n設定を保存しました。\n'
+  tr setup.saved
   printf '  %s\n' "$CONFIG_FILE"
-  printf 'MCIDテンプレート:\n  %s\n' "$TEMPLATE_DIR"
+  tr setup.templates "$TEMPLATE_DIR"
   if [[ "$accept_eula" != 'true' ]]; then
-    printf '\nEULAへ同意していないため、サーバー作成前に再度setupを実行してください。\n'
+    tr setup.eula_not_accepted
   fi
 }
 
