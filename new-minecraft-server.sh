@@ -188,8 +188,9 @@ yaml_get() {
 
 expand_path() {
   local value="$1"
+  local tilde_prefix='~/'
   value="${value//\$\{HOME\}/$HOME}"
-  if [[ "${value:0:2}" == "~/" ]]; then
+  if [[ "${value:0:2}" == "$tilde_prefix" ]]; then
     value="${HOME}/${value#\~/}"
   fi
   printf '%s' "$value"

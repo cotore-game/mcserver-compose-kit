@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=../new-minecraft-server.sh
+# shellcheck disable=SC1091 -- The computed repository path is intentional.
 source "${REPO_ROOT}/new-minecraft-server.sh"
 
 tests_run=0
