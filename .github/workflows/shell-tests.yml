@@ -1,0 +1,33 @@
+name: Shell tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install --yes shellcheck zip unzip
+
+      - name: Check Bash syntax
+        run: bash -n mcserver-kit new-minecraft-server.sh setup.sh install.sh uninstall.sh tests/run-tests.sh
+
+      - name: Check Python syntax
+        run: python3 -m py_compile scripts/detect-world-version.py
+
+      - name: Run ShellCheck
+        run: shellcheck mcserver-kit new-minecraft-server.sh setup.sh install.sh uninstall.sh tests/run-tests.sh
+
+      - name: Run specification tests
+        run: bash tests/run-tests.sh
