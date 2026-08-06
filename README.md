@@ -2,7 +2,66 @@
 
 WSL2とDocker Desktopを使い、Minecraft Javaの配布ワールドから独立したサーバー構成を作る対話式ツールです。
 
-サーバーごとに`compose.yaml`、`.env`、`data/world`を生成します。作成後のサーバーは自動起動しません。
+サーバーごとに`compose.yaml`、`.env`、`data/world`を生成し、確認後にそのまま起動することもできます。
+
+## 簡単インストール
+
+Docker Desktop、WSL2、Docker DesktopのWSL Integrationが設定済みであることを前提とします。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | bash
+```
+
+インストーラーは最新のGitHub Releaseを取得してSHA-256を検証します。不足している`python3`や`unzip`は、確認後に`sudo apt`で導入できます。インストール後は次で起動します。
+
+```bash
+mcserver-kit
+```
+
+主なサブコマンド：
+
+```bash
+mcserver-kit                 # 新しいサーバーを作成
+mcserver-kit setup           # 初回設定・再設定
+mcserver-kit uninstall       # 設定を残してアンインストール
+mcserver-kit uninstall --purge
+mcserver-kit --help
+```
+
+保存先は次のとおりです。
+
+- 本体: `~/.local/share/mcserver-compose-kit`
+- 設定とMCIDテンプレート: `~/.config/mcserver-compose-kit`
+- 起動コマンド: `~/.local/bin/mcserver-kit`
+
+同じインストールコマンドを再実行すると、本体だけを更新して設定を保持します。設定をやり直す場合：
+
+```bash
+mcserver-kit setup
+```
+
+アンインストール時は通常、設定を残します。
+
+```bash
+mcserver-kit uninstall
+```
+
+設定とMCIDテンプレートも含めて削除する場合：
+
+```bash
+mcserver-kit uninstall --purge
+```
+
+## Windows入力ダイアログ
+
+WSLからWindows PowerShellを呼び、ExplorerによるZIP／フォルダ選択と、Windows IMEを使えるMOTD入力画面を表示します。追加のWindowsアプリは不要です。
+
+Windowsダイアログを利用できない場合やキャンセルした場合は、従来のターミナル入力へ戻ります。無効にする場合は`config.yml`へ次を設定します。
+
+```yaml
+ui:
+  windows_dialogs: false
+```
 
 ## 主な機能
 
@@ -176,7 +235,9 @@ Windowsのダウンロードフォルダは、WSLから次のように指定で�
 
 ### Minecraftバージョン
 
-ランチャーや配布ページに書かれたバージョンをそのまま指定します。
+ワールドのフォルダまたはZIPを選ぶと、`level.dat`に保存されたMinecraftバージョンを検出し、入力時のデフォルト値にします。Enterを押せば検出結果を採用できます。
+
+検出できなかった場合は、`config.yml`の`defaults.minecraft_version`を候補にします。配布ページで別のバージョンが指定されている場合は、そちらを手動入力してください。
 
 ```text
 26.2
@@ -189,8 +250,8 @@ LATEST
 | Minecraft | Dockerイメージタグ |
 |---|---|
 | `26.x` / `LATEST` | `java25` |
-| `1.21.x` / `1.20.5`以降 | `java21` |
-| `1.18.x`～`1.20.4` | `java17` |
+| `1.21` / `1.21.x` / `1.20.5`以降 | `java21` |
+| `1.18`～`1.20` / `1.18.x`～`1.20.4` | `java17` |
 
 それより古いバージョンは自動判定せず停止します。必要なJavaタグを`config.yml`へ明示してください。
 
@@ -234,6 +295,20 @@ MCPacksなどのMinecraft向け配信サービスを利用できます。
 
 ## 作成後
 
+作成中は、ワールドのコピー、設定生成、Compose検証などの現在の処理を段階表示します。
+
+最後に、Docker Composeでそのまま起動するか確認します。起動を選んだ場合は、次の処理まで自動で行います。
+
+```bash
+docker compose config --quiet
+docker compose up -d
+docker compose ps
+```
+
+初回起動ではDockerイメージの取得に時間がかかることがあります。開始前にその旨を表示し、Docker Composeの進捗をそのまま表示します。
+
+手動で起動する場合：
+
 構成確認：
 
 ```bash
@@ -267,8 +342,24 @@ docker compose down
 
 ```bash
 bash -n new-minecraft-server.sh
+bash tests/run-tests.sh
 git check-ignore -v config.yml
 git status --short
 ```
 
 `config.yml`や`.env`がステージ対象に含まれていないことを確認してください。
+
+## テスト
+
+仕様テストは、Javaイメージの選択、`level.dat`からの保存バージョン検出、メモリとWindowsパスの正規化、入れ子になったワールドの検出、ZIPからのワールド取り込みを確認します。
+
+```bash
+bash tests/run-tests.sh
+```
+
+ZIPのテストには`zip`と`unzip`が必要です。`zip`がないローカル環境ではZIPテストだけをスキップします。GitHub Actionsでは必要なコマンドを導入し、次を自動実行します。
+
+- Bash構文チェック
+- Python構文チェック
+- ShellCheck
+- 仕様テスト
