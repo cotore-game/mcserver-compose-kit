@@ -4,6 +4,7 @@
   "cli.commands": "コマンド:",
   "cli.create": "対話形式で新しいサーバーを作成します（省略時の動作）",
   "cli.setup": "Owner、EULA、MCIDテンプレート、Playit等を設定します",
+  "cli.reset": "設定とMCIDテンプレートだけを削除し、本体とサーバーは保持します",
   "cli.uninstall": "本体を削除し、設定とMCIDテンプレートは保持します",
   "cli.uninstall_purge": "本体、設定、MCIDテンプレートをすべて削除します",
   "cli.help": "このヘルプを表示します",
@@ -31,5 +32,11 @@
   "input.yes_no": "yまたはnを入力してください。\n",
   "input.mcid": "MCID",
   "input.mcid_rules": "MCIDは英数字と_の3～16文字です。\n",
-  "input.one_per_line": "1行に1つ入力し、空Enterで終了します。\n"
+  "input.one_per_line": "1行に1つ入力し、空Enterで終了します。\n",
+  "reset.usage": "使い方: mcserver-kit reset [--yes]\n",
+  "reset.unsafe": "危険なパスが指定されているためリセットを拒否しました。\n",
+  "reset.summary": "次の設定を削除します:\n  %s\n  %s\n作成済みサーバー、ワールド、インストール済み本体は削除しません。\n",
+  "reset.confirm": "続行しますか？ [y/N]: ",
+  "reset.cancelled": "リセットをキャンセルしました。\n",
+  "reset.done": "設定とMCIDテンプレートを削除しました。mcserver-kit setupで再設定できます。\n"
 }

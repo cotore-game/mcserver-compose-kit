@@ -22,10 +22,10 @@ jobs:
 
       - name: Run checks
         run: |
-          bash -n mcserver-kit new-minecraft-server.sh setup.sh install.sh uninstall.sh tests/run-tests.sh
+          bash -n mcserver-kit new-minecraft-server.sh setup.sh reset.sh install.sh uninstall.sh tests/run-tests.sh
           python3 -m py_compile scripts/detect-world-version.py scripts/validate-locales.py
           python3 scripts/validate-locales.py
-          shellcheck -x mcserver-kit new-minecraft-server.sh setup.sh install.sh uninstall.sh tests/run-tests.sh
+          shellcheck -x mcserver-kit new-minecraft-server.sh setup.sh reset.sh install.sh uninstall.sh tests/run-tests.sh
           bash tests/run-tests.sh
 
       - name: Build release archive
@@ -35,6 +35,7 @@ jobs:
             new-minecraft-server.sh \
             mcserver-kit \
             setup.sh \
+            reset.sh \
             install.sh \
             uninstall.sh \
             config.example.yml \

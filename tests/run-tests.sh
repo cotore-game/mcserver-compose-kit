@@ -289,6 +289,27 @@ test_setup_command() {
   assert_equal 'absent' "$(! grep -q 'playit-secret-for-test' "$setup_log" && printf absent)" 'setup does not print the Playit secret'
 }
 
+test_reset_command() {
+  local temp_dir="$1"
+  local config_dir="${temp_dir}/reset/config"
+  local config_file="${config_dir}/config.yml"
+  local template_dir="${config_dir}/mcid-templates"
+  local server_dir="${temp_dir}/reset/servers/keep-me"
+
+  mkdir -p "$template_dir" "$server_dir"
+  : >"$config_file"
+  : >"${template_dir}/default.txt"
+  : >"${server_dir}/level.dat"
+
+  MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_MCID_TEMPLATE_DIR="$template_dir" \
+    bash "${REPO_ROOT}/mcserver-kit" --lang en reset --yes >/dev/null
+
+  assert_equal 'absent' "$([[ ! -f "$config_file" ]] && printf absent)" 'reset removes config.yml'
+  assert_equal 'absent' "$([[ ! -d "$template_dir" ]] && printf absent)" 'reset removes MCID templates'
+  assert_equal 'present' "$([[ -f "${server_dir}/level.dat" ]] && printf present)" 'reset preserves created servers and worlds'
+}
+
 main() {
   TEST_TEMP_DIR="$(mktemp -d)"
   trap cleanup EXIT
@@ -302,6 +323,7 @@ main() {
   test_creation_flow "$TEST_TEMP_DIR"
   test_local_installation "$TEST_TEMP_DIR"
   test_setup_command "$TEST_TEMP_DIR"
+  test_reset_command "$TEST_TEMP_DIR"
 
   printf 'PASS: %d specification tests, %d skipped\n' "$tests_run" "$tests_skipped"
 }

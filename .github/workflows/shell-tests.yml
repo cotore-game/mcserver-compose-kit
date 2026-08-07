@@ -24,7 +24,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes shellcheck zip unzip
 
       - name: Check Bash syntax
-        run: bash -n mcserver-kit new-minecraft-server.sh setup.sh install.sh uninstall.sh tests/run-tests.sh
+        run: bash -n mcserver-kit new-minecraft-server.sh setup.sh reset.sh install.sh uninstall.sh tests/run-tests.sh
 
       - name: Check Python syntax
         run: python3 -m py_compile scripts/detect-world-version.py scripts/validate-locales.py
@@ -33,7 +33,7 @@ jobs:
         run: python3 scripts/validate-locales.py
 
       - name: Run ShellCheck
-        run: shellcheck -x mcserver-kit new-minecraft-server.sh setup.sh install.sh uninstall.sh tests/run-tests.sh
+        run: shellcheck -x mcserver-kit new-minecraft-server.sh setup.sh reset.sh install.sh uninstall.sh tests/run-tests.sh
 
       - name: Run specification tests
         run: bash tests/run-tests.sh
