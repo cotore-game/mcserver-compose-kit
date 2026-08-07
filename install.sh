@@ -2,12 +2,15 @@
 set -Eeuo pipefail
 
 REPOSITORY='cotore-game/mcserver-compose-kit'
+VERSION="${MCSERVER_KIT_VERSION:-latest}"
 INSTALL_DIR="${MCSERVER_KIT_INSTALL_DIR:-${HOME}/.local/share/mcserver-compose-kit}"
 CONFIG_DIR="${MCSERVER_KIT_CONFIG_DIR:-${HOME}/.config/mcserver-compose-kit}"
 BIN_DIR="${MCSERVER_KIT_BIN_DIR:-${HOME}/.local/bin}"
-if ! SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"; then
+SCRIPT_PATH="${BASH_SOURCE[0]-}"
+if [[ -n "$SCRIPT_PATH" ]] && ! SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" 2>/dev/null && pwd)"; then
   SCRIPT_DIR=''
 fi
+SCRIPT_DIR="${SCRIPT_DIR:-}"
 TEMP_DIR=''
 
 cleanup() {
@@ -17,9 +20,76 @@ cleanup() {
 }
 trap cleanup EXIT
 
+usage() {
+  cat <<'USAGE'
+Usage: install.sh [--version VERSION]
+
+Options:
+  --version VERSION  Install a release such as v0.2.0 (default: latest)
+  -h, --help         Show this help
+USAGE
+}
+
+parse_arguments() {
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --version)
+        [[ "$#" -ge 2 ]] || {
+          printf '%s\n' '--versionにはバージョンが必要です。' >&2
+          return 2
+        }
+        VERSION="$2"
+        shift 2
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      *)
+        printf '不明なオプション: %s\n' "$1" >&2
+        usage >&2
+        return 2
+        ;;
+    esac
+  done
+
+  if [[ "$VERSION" != 'latest' ]]; then
+    [[ "$VERSION" == v* ]] || VERSION="v${VERSION}"
+    [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || {
+      printf '無効なバージョン: %s\n' "$VERSION" >&2
+      return 2
+    }
+  fi
+}
+
+release_download_base() {
+  if [[ "$VERSION" == 'latest' ]]; then
+    printf 'https://github.com/%s/releases/latest/download' "$REPOSITORY"
+  else
+    printf 'https://github.com/%s/releases/download/%s' "$REPOSITORY" "$VERSION"
+  fi
+}
+
+read_from_terminal() {
+  local prompt="$1"
+  local variable_name="$2"
+
+  if [[ -r /dev/tty ]]; then
+    IFS= read -r -p "$prompt" "$variable_name" </dev/tty
+  else
+    printf '対話入力用の端末を開けません。通常のWSLターミナルから再実行してください。\n' >&2
+    return 1
+  fi
+}
+
 download_release() {
-  local archive_url="https://github.com/${REPOSITORY}/releases/latest/download/mcserver-compose-kit.tar.gz"
-  local checksum_url="${archive_url}.sha256"
+  local download_base
+  local archive_url
+  local checksum_url
+
+  download_base="$(release_download_base)"
+  archive_url="${download_base}/mcserver-compose-kit.tar.gz"
+  checksum_url="${archive_url}.sha256"
 
   command -v curl >/dev/null 2>&1 || {
     printf 'curlが必要です。次を実行してください: sudo apt install curl\n' >&2
@@ -27,7 +97,7 @@ download_release() {
   }
 
   TEMP_DIR="$(mktemp -d)"
-  printf '[1/3] 最新リリースをダウンロードしています。\n' >&2
+  printf '[1/3] リリース %s をダウンロードしています。\n' "$VERSION" >&2
   curl --fail --location --show-error --progress-bar \
     "$archive_url" --output "${TEMP_DIR}/mcserver-compose-kit.tar.gz" >&2
   curl --fail --location --silent --show-error \
@@ -51,7 +121,7 @@ ensure_dependencies() {
 
   if [[ "${#missing_packages[@]}" -gt 0 ]]; then
     printf '不足しているパッケージ: %s\n' "${missing_packages[*]}"
-    read -r -p 'sudo aptでインストールしますか？ [Y/n]: ' answer
+    read_from_terminal 'sudo aptでインストールしますか？ [Y/n]: ' answer
     case "${answer:-y}" in
       y | Y | yes | YES)
         sudo apt-get update
@@ -79,6 +149,7 @@ main() {
   local needs_setup=false
   local setup_answer
 
+  parse_arguments "$@"
   ensure_dependencies
 
   if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/new-minecraft-server.sh" ]]; then
@@ -136,12 +207,16 @@ LAUNCHER
   printf '\n初回起動前に、設定ファイルのEULA同意とMinecraft IDを編集してください。\n'
 
   if [[ "$needs_setup" == 'true' && "${MCSERVER_KIT_SKIP_SETUP:-false}" != 'true' ]]; then
-    read -r -p '初回セットアップを開始しますか？ [Y/n]: ' setup_answer || setup_answer=''
+    read_from_terminal '初回セットアップを開始しますか？ [Y/n]: ' setup_answer || setup_answer=''
     case "${setup_answer:-y}" in
       y | Y | yes | YES)
-        MCSERVER_KIT_CONFIG="${CONFIG_DIR}/config.yml" \
-          MCSERVER_KIT_MCID_TEMPLATE_DIR="${CONFIG_DIR}/mcid-templates" \
-          "${INSTALL_DIR}/setup.sh"
+        if [[ -r /dev/tty ]]; then
+          MCSERVER_KIT_CONFIG="${CONFIG_DIR}/config.yml" \
+            MCSERVER_KIT_MCID_TEMPLATE_DIR="${CONFIG_DIR}/mcid-templates" \
+            "${INSTALL_DIR}/setup.sh" </dev/tty
+        else
+          printf '後から mcserver-kit setup で設定してください。\n'
+        fi
         ;;
       *)
         printf '後から mcserver-kit setup で設定できます。\n'
@@ -150,4 +225,6 @@ LAUNCHER
   fi
 }
 
-main "$@"
+if [[ "${MCSERVER_KIT_INSTALLER_SKIP_MAIN:-false}" != 'true' ]]; then
+  main "$@"
+fi

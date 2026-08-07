@@ -12,6 +12,15 @@ Docker Desktop、WSL2、Docker DesktopのWSL Integrationが設定済みである
 curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | bash
 ```
 
+バージョンを固定する場合は、`bash -s --`以降へ指定します。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | \
+  bash -s -- --version v0.2.0
+```
+
+`MCSERVER_KIT_VERSION=v0.2.0`環境変数でも指定できます。省略時は最新Releaseを使用します。
+
 インストーラーは最新のGitHub Releaseを取得してSHA-256を検証します。不足している`python3`や`unzip`は、確認後に`sudo apt`で導入できます。インストール後は次で起動します。
 
 ```bash

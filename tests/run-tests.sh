@@ -69,6 +69,28 @@ test_locales() {
   assert_equal 'present' "$(grep -q '対話形式で新しいサーバーを作成' <<<"$japanese_help" && printf present)" 'Japanese help is loaded from the locale catalog'
 }
 
+test_installer_version_selection() {
+  local installer_output
+
+  installer_output="$(MCSERVER_KIT_INSTALLER_SKIP_MAIN=true bash -c '
+    source "$1"
+    VERSION=latest
+    parse_arguments --version 0.2.0
+    printf "%s\n" "$VERSION"
+    release_download_base
+  ' _ "${REPO_ROOT}/install.sh")"
+  assert_equal $'v0.2.0\nhttps://github.com/cotore-game/mcserver-compose-kit/releases/download/v0.2.0' \
+    "$installer_output" 'installer accepts a pinned release version'
+
+  assert_fails 'installer rejects invalid release versions' \
+    env MCSERVER_KIT_INSTALLER_SKIP_MAIN=true bash -c \
+      'source "$1"; parse_arguments --version latest-main' _ "${REPO_ROOT}/install.sh"
+
+  installer_output="$(bash -s -- --help <"${REPO_ROOT}/install.sh")"
+  assert_equal 'present' "$(grep -q -- '--version VERSION' <<<"$installer_output" && printf present)" \
+    'installer can run from a pipe without BASH_SOURCE errors'
+}
+
 test_input_normalization() {
   assert_equal '8G' "$(normalize_memory '8')" 'plain memory values mean GiB'
   assert_equal '8192M' "$(normalize_memory '8192m')" 'memory suffix is normalized'
@@ -335,6 +357,7 @@ main() {
 
   test_version_resolution
   test_locales
+  test_installer_version_selection
   test_input_normalization
   test_world_discovery "$TEST_TEMP_DIR"
   test_saved_version_detection "$TEST_TEMP_DIR"
