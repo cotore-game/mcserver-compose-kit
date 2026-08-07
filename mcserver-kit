@@ -27,6 +27,8 @@ show_help() {
   cat <<HELP
   mcserver-kit [create]
   mcserver-kit setup
+  mcserver-kit config
+  mcserver-kit templates
   mcserver-kit reset [--yes]
   mcserver-kit uninstall [--purge]
   mcserver-kit --lang <code> [command]
@@ -37,6 +39,8 @@ HELP
   printf '\n'
   printf '  %-20s %s\n' create "$(tr cli.create)"
   printf '  %-20s %s\n' setup "$(tr cli.setup)"
+  printf '  %-20s %s\n' config "$(tr cli.config)"
+  printf '  %-20s %s\n' templates "$(tr cli.templates)"
   printf '  %-20s %s\n' reset "$(tr cli.reset)"
   printf '  %-20s %s\n' uninstall "$(tr cli.uninstall)"
   printf '  %-20s %s\n' 'uninstall --purge' "$(tr cli.uninstall_purge)"
@@ -59,6 +63,14 @@ case "$command_name" in
   setup)
     shift
     exec "${SCRIPT_DIR}/setup.sh" "$@"
+    ;;
+  config)
+    shift
+    exec "${SCRIPT_DIR}/config-tui.sh" "$@"
+    ;;
+  templates)
+    shift
+    exec "${SCRIPT_DIR}/config-tui.sh" templates "$@"
     ;;
   reset)
     shift

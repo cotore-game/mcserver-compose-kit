@@ -310,6 +310,25 @@ test_reset_command() {
   assert_equal 'present' "$([[ -f "${server_dir}/level.dat" ]] && printf present)" 'reset preserves created servers and worlds'
 }
 
+test_config_value_editor() {
+  local temp_dir="$1"
+  local config_file="${temp_dir}/config-editor/config.yml"
+  mkdir -p "$(dirname -- "$config_file")"
+  cat >"$config_file" <<'CONFIG'
+owner:
+  minecraft_id: "BeforeOwner"
+access:
+  whitelist_template: "default"
+CONFIG
+  chmod 600 "$config_file"
+
+  assert_equal 'BeforeOwner' "$(python3 "${REPO_ROOT}/scripts/config-value.py" get "$config_file" owner minecraft_id)" 'config editor reads scalar values'
+  python3 "${REPO_ROOT}/scripts/config-value.py" set "$config_file" owner minecraft_id 'AfterOwner'
+  assert_equal 'AfterOwner' "$(python3 "${REPO_ROOT}/scripts/config-value.py" get "$config_file" owner minecraft_id)" 'config editor updates scalar values'
+  assert_equal 'default' "$(python3 "${REPO_ROOT}/scripts/config-value.py" get "$config_file" access whitelist_template)" 'config editor preserves unrelated settings'
+  assert_equal '600' "$(stat -c '%a' "$config_file")" 'config editor preserves restricted permissions'
+}
+
 main() {
   TEST_TEMP_DIR="$(mktemp -d)"
   trap cleanup EXIT
@@ -324,6 +343,7 @@ main() {
   test_local_installation "$TEST_TEMP_DIR"
   test_setup_command "$TEST_TEMP_DIR"
   test_reset_command "$TEST_TEMP_DIR"
+  test_config_value_editor "$TEST_TEMP_DIR"
 
   printf 'PASS: %d specification tests, %d skipped\n' "$tests_run" "$tests_skipped"
 }

@@ -47,6 +47,7 @@ ensure_dependencies() {
 
   command -v python3 >/dev/null 2>&1 || missing_packages+=(python3)
   command -v unzip >/dev/null 2>&1 || missing_packages+=(unzip)
+  command -v whiptail >/dev/null 2>&1 || missing_packages+=(whiptail)
 
   if [[ "${#missing_packages[@]}" -gt 0 ]]; then
     printf '不足しているパッケージ: %s\n' "${missing_packages[*]}"
@@ -92,6 +93,7 @@ main() {
   install -m 755 "${source_dir}/mcserver-kit" "${INSTALL_DIR}/mcserver-kit"
   install -m 755 "${source_dir}/setup.sh" "${INSTALL_DIR}/setup.sh"
   install -m 755 "${source_dir}/reset.sh" "${INSTALL_DIR}/reset.sh"
+  install -m 755 "${source_dir}/config-tui.sh" "${INSTALL_DIR}/config-tui.sh"
   install -m 755 "${source_dir}/uninstall.sh" "${INSTALL_DIR}/uninstall.sh"
   install -m 644 "${source_dir}/config.example.yml" "${INSTALL_DIR}/config.example.yml"
   install -m 644 "${source_dir}/compose-example.yaml" "${INSTALL_DIR}/compose-example.yaml"
@@ -99,6 +101,7 @@ main() {
   install -m 644 "${source_dir}/LICENSE" "${INSTALL_DIR}/LICENSE"
   mkdir -p "${INSTALL_DIR}/scripts"
   install -m 755 "${source_dir}/scripts/detect-world-version.py" "${INSTALL_DIR}/scripts/detect-world-version.py"
+  install -m 755 "${source_dir}/scripts/config-value.py" "${INSTALL_DIR}/scripts/config-value.py"
   install -m 644 "${source_dir}/scripts/i18n.sh" "${INSTALL_DIR}/scripts/i18n.sh"
   install -m 644 "${source_dir}/scripts/windows-dialog.ps1" "${INSTALL_DIR}/scripts/windows-dialog.ps1"
   mkdir -p "${INSTALL_DIR}/locales"
