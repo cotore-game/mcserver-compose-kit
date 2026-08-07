@@ -6,6 +6,9 @@ VERSION="${MCSERVER_KIT_VERSION:-latest}"
 INSTALL_DIR="${MCSERVER_KIT_INSTALL_DIR:-${HOME}/.local/share/mcserver-compose-kit}"
 CONFIG_DIR="${MCSERVER_KIT_CONFIG_DIR:-${HOME}/.config/mcserver-compose-kit}"
 BIN_DIR="${MCSERVER_KIT_BIN_DIR:-${HOME}/.local/bin}"
+SHELL_RC="${MCSERVER_KIT_SHELL_RC:-${HOME}/.bashrc}"
+PATH_BLOCK_START='# >>> mcserver-kit PATH >>>'
+PATH_BLOCK_END='# <<< mcserver-kit PATH <<<'
 SCRIPT_PATH="${BASH_SOURCE[0]-}"
 if [[ -n "$SCRIPT_PATH" ]] && ! SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" 2>/dev/null && pwd)"; then
   SCRIPT_DIR=''
@@ -82,6 +85,22 @@ read_from_terminal() {
   fi
 }
 
+register_bin_path() {
+  mkdir -p "$(dirname -- "$SHELL_RC")"
+  touch "$SHELL_RC"
+  if grep -Fxq "$PATH_BLOCK_START" "$SHELL_RC"; then
+    return
+  fi
+
+  {
+    printf '\n%s\n' "$PATH_BLOCK_START"
+    printf 'case ":%sPATH:" in\n' '$'
+    printf '  *:%q:*) ;;\n' "$BIN_DIR"
+    printf '  *) export PATH=%q:"%sPATH" ;;\n' "$BIN_DIR" '$'
+    printf 'esac\n%s\n' "$PATH_BLOCK_END"
+  } >>"$SHELL_RC"
+}
+
 download_release() {
   local download_base
   local archive_url
@@ -146,8 +165,6 @@ ensure_dependencies() {
 
 main() {
   local source_dir
-  local needs_setup=false
-  local setup_answer
 
   parse_arguments "$@"
   ensure_dependencies
@@ -180,7 +197,6 @@ main() {
 
   if [[ ! -f "${CONFIG_DIR}/config.yml" ]]; then
     install -m 600 "${source_dir}/config.example.yml" "${CONFIG_DIR}/config.yml"
-    needs_setup=true
   fi
   if ! find "${CONFIG_DIR}/mcid-templates" -maxdepth 1 -type f -name '*.txt' -print -quit | grep -q .; then
     cp -a "${source_dir}/mcid-templates/." "${CONFIG_DIR}/mcid-templates/"
@@ -191,38 +207,25 @@ main() {
 export MCSERVER_KIT_INSTALL_DIR="\${MCSERVER_KIT_INSTALL_DIR:-${INSTALL_DIR}}"
 export MCSERVER_KIT_CONFIG_DIR="\${MCSERVER_KIT_CONFIG_DIR:-${CONFIG_DIR}}"
 export MCSERVER_KIT_BIN_DIR="\${MCSERVER_KIT_BIN_DIR:-${BIN_DIR}}"
+export MCSERVER_KIT_SHELL_RC="\${MCSERVER_KIT_SHELL_RC:-${SHELL_RC}}"
 export MCSERVER_KIT_CONFIG="\${MCSERVER_KIT_CONFIG:-${CONFIG_DIR}/config.yml}"
 export MCSERVER_KIT_MCID_TEMPLATE_DIR="\${MCSERVER_KIT_MCID_TEMPLATE_DIR:-${CONFIG_DIR}/mcid-templates}"
 exec "${INSTALL_DIR}/mcserver-kit" "\$@"
 LAUNCHER
   chmod 755 "${BIN_DIR}/mcserver-kit"
+  register_bin_path
 
   printf '\nインストールが完了しました。\n'
   printf '設定ファイル: %s\n' "${CONFIG_DIR}/config.yml"
-  printf '起動コマンド: mcserver-kit\n'
+  printf 'PATH設定: %s\n' "$SHELL_RC"
   if [[ ":$PATH:" != *":${BIN_DIR}:"* ]]; then
-    printf '\n%s がPATHにありません。次をシェル設定へ追加してください:\n' "$BIN_DIR"
-    printf '%s\n' "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+    printf '\n現在のターミナルへPATHを反映するには、次を実行してください:\n'
+    printf '  source %q\n' "$SHELL_RC"
   fi
-  printf '\n初回起動前に、設定ファイルのEULA同意とMinecraft IDを編集してください。\n'
-
-  if [[ "$needs_setup" == 'true' && "${MCSERVER_KIT_SKIP_SETUP:-false}" != 'true' ]]; then
-    read_from_terminal '初回セットアップを開始しますか？ [Y/n]: ' setup_answer || setup_answer=''
-    case "${setup_answer:-y}" in
-      y | Y | yes | YES)
-        if [[ -r /dev/tty ]]; then
-          MCSERVER_KIT_CONFIG="${CONFIG_DIR}/config.yml" \
-            MCSERVER_KIT_MCID_TEMPLATE_DIR="${CONFIG_DIR}/mcid-templates" \
-            "${INSTALL_DIR}/setup.sh" </dev/tty
-        else
-          printf '後から mcserver-kit setup で設定してください。\n'
-        fi
-        ;;
-      *)
-        printf '後から mcserver-kit setup で設定できます。\n'
-        ;;
-    esac
-  fi
+  printf '\nサーバーを作成する前に、初回設定を実行してください:\n'
+  printf '  mcserver-kit setup\n'
+  printf 'PATH反映前でも次のコマンドで実行できます:\n'
+  printf '  %q setup\n' "${BIN_DIR}/mcserver-kit"
 }
 
 if [[ "${MCSERVER_KIT_INSTALLER_SKIP_MAIN:-false}" != 'true' ]]; then

@@ -91,6 +91,22 @@ test_installer_version_selection() {
     'installer can run from a pipe without BASH_SOURCE errors'
 }
 
+test_setup_gate() {
+  local temp_dir="$1"
+  local config_file="${temp_dir}/setup-gate/config.yml"
+  local template_dir="${temp_dir}/setup-gate/templates"
+
+  mkdir -p "$template_dir"
+  cat >"$config_file" <<'CONFIG'
+setup:
+  completed: false
+CONFIG
+  assert_fails 'server creation is blocked until setup completes' \
+    env MCSERVER_KIT_CONFIG="$config_file" \
+      MCSERVER_KIT_MCID_TEMPLATE_DIR="$template_dir" \
+      bash "${REPO_ROOT}/new-minecraft-server.sh"
+}
+
 test_input_normalization() {
   assert_equal '8G' "$(normalize_memory '8')" 'plain memory values mean GiB'
   assert_equal '8192M' "$(normalize_memory '8192m')" 'memory suffix is normalized'
@@ -207,6 +223,8 @@ test_creation_flow() {
   mkdir -p "$world_root"
   : >"${world_root}/level.dat"
   cat >"$config_file" <<CONFIG
+setup:
+  completed: true
 owner:
   minecraft_id: "TestOwner"
 minecraft:
@@ -246,16 +264,17 @@ test_local_installation() {
   local bin_dir="${temp_dir}/install/bin"
   local fake_bin="${temp_dir}/install/fake-bin"
   local install_log="${temp_dir}/install/install.log"
+  local shell_rc="${temp_dir}/install/bashrc"
   local installed_help
 
   mkdir -p "$fake_bin"
   ln -s /usr/bin/true "${fake_bin}/unzip"
 
   PATH="${fake_bin}:$PATH" \
-    MCSERVER_KIT_SKIP_SETUP=true \
     MCSERVER_KIT_INSTALL_DIR="$install_dir" \
     MCSERVER_KIT_CONFIG_DIR="$config_dir" \
     MCSERVER_KIT_BIN_DIR="$bin_dir" \
+    MCSERVER_KIT_SHELL_RC="$shell_rc" \
     bash "${REPO_ROOT}/install.sh" >"$install_log"
 
   assert_equal 'present' "$([[ -x "${bin_dir}/mcserver-kit" ]] && printf present)" 'the installer creates the launcher'
@@ -263,19 +282,24 @@ test_local_installation() {
   assert_equal 'present' "$(grep -q 'mcserver-kit setup' <<<"$installed_help" && printf present)" 'the installed launcher exposes subcommand help'
   assert_equal 'present' "$([[ -f "${config_dir}/config.yml" ]] && printf present)" 'the installer creates the initial config'
   assert_equal 'present' "$([[ -f "${install_dir}/scripts/windows-dialog.ps1" ]] && printf present)" 'the installer includes the Windows dialog helper'
+  assert_equal '1' "$(grep -Fxc '# >>> mcserver-kit PATH >>>' "$shell_rc")" 'the installer registers one managed PATH block'
+  assert_equal 'present' "$(grep -q 'mcserver-kit setup' "$install_log" && printf present)" 'the installer instructs the user to run setup'
+  assert_equal 'absent' "$(! grep -q '初回セットアップを開始' "$install_log" && printf absent)" 'the installer does not start setup automatically'
 
   printf '\n# preserve-on-update\n' >>"${config_dir}/config.yml"
   PATH="${fake_bin}:$PATH" \
-    MCSERVER_KIT_SKIP_SETUP=true \
     MCSERVER_KIT_INSTALL_DIR="$install_dir" \
     MCSERVER_KIT_CONFIG_DIR="$config_dir" \
     MCSERVER_KIT_BIN_DIR="$bin_dir" \
+    MCSERVER_KIT_SHELL_RC="$shell_rc" \
     bash "${REPO_ROOT}/install.sh" >>"$install_log"
   assert_equal 'present' "$(grep -q 'preserve-on-update' "${config_dir}/config.yml" && printf present)" 'updating preserves config.yml'
+  assert_equal '1' "$(grep -Fxc '# >>> mcserver-kit PATH >>>' "$shell_rc")" 'updating does not duplicate the PATH block'
 
   "${bin_dir}/mcserver-kit" uninstall >>"$install_log"
   assert_equal 'absent' "$([[ ! -d "$install_dir" ]] && printf absent)" 'the uninstaller removes installed program files'
   assert_equal 'present' "$([[ -f "${config_dir}/config.yml" ]] && printf present)" 'the uninstaller preserves config by default'
+  assert_equal 'absent' "$(! grep -q 'mcserver-kit PATH' "$shell_rc" && printf absent)" 'the uninstaller removes its managed PATH block'
 }
 
 test_setup_command() {
@@ -305,6 +329,7 @@ test_setup_command() {
       bash "${REPO_ROOT}/mcserver-kit" setup >"$setup_log" 2>&1
 
   assert_equal 'present' "$(grep -q 'minecraft_id: "TestOwner"' "$config_file" && printf present)" 'setup writes the Owner MCID'
+  assert_equal 'present' "$(grep -q 'completed: true' "$config_file" && printf present)" 'setup marks the initial configuration complete'
   assert_equal 'present' "$(grep -q 'secret_key: "playit-secret-for-test"' "$config_file" && printf present)" 'setup writes the Playit secret'
   assert_equal 'present' "$(grep -q '^PlayerTwo$' "${template_dir}/default.txt" && printf present)" 'setup creates the default whitelist template'
   assert_equal '600' "$(stat -c '%a' "$config_file")" 'setup restricts config.yml permissions'
@@ -358,6 +383,7 @@ main() {
   test_version_resolution
   test_locales
   test_installer_version_selection
+  test_setup_gate "$TEST_TEMP_DIR"
   test_input_normalization
   test_world_discovery "$TEST_TEMP_DIR"
   test_saved_version_detection "$TEST_TEMP_DIR"

@@ -431,6 +431,10 @@ main() {
 [[ -d "$MCID_TEMPLATE_DIR" ]] ||
   die "MCIDテンプレートディレクトリがありません: ${MCID_TEMPLATE_DIR}"
 
+setup_completed="$(yaml_get 'setup.completed' 'false')"
+is_true "$setup_completed" ||
+  die "初回設定が完了していません。先に mcserver-kit setup を実行してください"
+
 owner_mcid="$(yaml_get 'owner.minecraft_id')"
 validate_mcid "$owner_mcid" ||
   die "config.ymlのowner.minecraft_idを設定してください"

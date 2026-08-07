@@ -1,6 +1,10 @@
 # このファイルは公開用の見本です。
 # 実際には config.yml へコピーし、config.yml だけを編集してください。
 
+setup:
+  # mcserver-kit setupの完了時にtrueになります。
+  completed: false
+
 owner:
   minecraft_id: "YourMinecraftID"
 

@@ -141,6 +141,9 @@ main() {
   } >"${TEMPLATE_DIR}/default.txt"
 
   cat >"$CONFIG_FILE" <<CONFIG
+setup:
+  completed: true
+
 owner:
   minecraft_id: $(yaml_quote "$owner_mcid")
 

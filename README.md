@@ -23,7 +23,10 @@ curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/ma
 
 インストーラーは最新のGitHub Releaseを取得してSHA-256を検証します。不足している`python3`や`unzip`は、確認後に`sudo apt`で導入できます。インストール後は次で起動します。
 
+インストーラーは`~/.bashrc`へ管理済みのPATH設定を追加します。現在開いているターミナルには自動反映しないため、表示された`source ~/.bashrc`を実行するか、ターミナルを開き直してください。インストール直後にsetupは自動起動しません。
+
 ```bash
+mcserver-kit setup
 mcserver-kit
 ```
 
