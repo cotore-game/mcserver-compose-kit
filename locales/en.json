@@ -37,10 +37,10 @@
   "input.one_per_line": "Enter one per line and press Enter on an empty line to finish.\n",
   "reset.usage": "Usage: mcserver-kit reset [--yes]\n",
   "reset.unsafe": "Refusing to reset an unsafe path.\n",
-  "reset.summary": "The following settings will be deleted:\n  %s\n  %s\nCreated servers, worlds, and the installed program will not be deleted.\n",
+  "reset.summary": "The following settings will be deleted:\n  %s\n  %s\n  %s\nCreated servers, worlds, and the installed program will not be deleted.\n",
   "reset.confirm": "Continue? [y/N]: ",
   "reset.cancelled": "Reset cancelled.\n",
-  "reset.done": "Settings and MCID templates were deleted. Run mcserver-kit setup to configure them again.\n",
+  "reset.done": "Settings, MCID templates, and the language preference were deleted. Run mcserver-kit setup to configure them again.\n",
   "tui.missing": "whiptail is required. Install it with: sudo apt install whiptail\n",
   "tui.no_config": "No configuration found. Run mcserver-kit setup first.\n",
   "tui.main_prompt": "Choose a setting to manage",
@@ -68,5 +68,9 @@
   "tui.delete": "Delete template",
   "tui.template_referenced": "This template is referenced by whitelist or OP settings and cannot be deleted.",
   "tui.template_delete_confirm": "Delete template %s?",
-  "tui.back": "Back"
+  "tui.back": "Back",
+  "cli.lang": "Set the persistent display language",
+  "lang.usage": "Usage: mcserver-kit lang --ja|--en",
+  "lang.unsupported": "Unsupported language: %s",
+  "lang.saved": "Display language set to English."
 }

@@ -42,9 +42,18 @@ mcserver-kit --help
 
 ### Language / 言語
 
-By default, the language is selected from`LANG`（`ja*`は日本語、それ以外は英語）. You can override it for a command:
+The default language is English. Save a persistent language preference with:
 
-デフォルトでは`LANG`から言語を選択します（`ja*`は日本語、それ以外は英語）。コマンド単位でも指定できます。
+初期言語は英語です。日本語へ永続的に変更する場合：
+
+```bash
+mcserver-kit lang --ja
+mcserver-kit lang --en
+```
+
+You can also override the language for one command only.
+
+コマンド1回だけ言語を上書きすることもできます。
 
 ```bash
 mcserver-kit --lang en --help

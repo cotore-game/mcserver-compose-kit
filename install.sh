@@ -7,6 +7,7 @@ INSTALL_DIR="${MCSERVER_KIT_INSTALL_DIR:-${HOME}/.local/share/mcserver-compose-k
 CONFIG_DIR="${MCSERVER_KIT_CONFIG_DIR:-${HOME}/.config/mcserver-compose-kit}"
 BIN_DIR="${MCSERVER_KIT_BIN_DIR:-${HOME}/.local/bin}"
 SHELL_RC="${MCSERVER_KIT_SHELL_RC:-${HOME}/.bashrc}"
+LANGUAGE_FILE="${MCSERVER_KIT_LANGUAGE_FILE:-${CONFIG_DIR}/language}"
 PATH_BLOCK_START='# >>> mcserver-kit PATH >>>'
 PATH_BLOCK_END='# <<< mcserver-kit PATH <<<'
 SCRIPT_PATH="${BASH_SOURCE[0]-}"
@@ -38,7 +39,7 @@ parse_arguments() {
     case "$1" in
       --version)
         [[ "$#" -ge 2 ]] || {
-          printf '%s\n' '--versionにはバージョンが必要です。' >&2
+          printf '%s\n' '--version requires a version.' >&2
           return 2
         }
         VERSION="$2"
@@ -49,7 +50,7 @@ parse_arguments() {
         exit 0
         ;;
       *)
-        printf '不明なオプション: %s\n' "$1" >&2
+        printf 'Unknown option: %s\n' "$1" >&2
         usage >&2
         return 2
         ;;
@@ -59,7 +60,7 @@ parse_arguments() {
   if [[ "$VERSION" != 'latest' ]]; then
     [[ "$VERSION" == v* ]] || VERSION="v${VERSION}"
     [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || {
-      printf '無効なバージョン: %s\n' "$VERSION" >&2
+      printf 'Invalid version: %s\n' "$VERSION" >&2
       return 2
     }
   fi
@@ -80,7 +81,7 @@ read_from_terminal() {
   if [[ -r /dev/tty ]]; then
     IFS= read -r -p "$prompt" "$variable_name" </dev/tty
   else
-    printf '対話入力用の端末を開けません。通常のWSLターミナルから再実行してください。\n' >&2
+    printf 'Cannot open a terminal for interactive input. Run this again from a regular WSL terminal.\n' >&2
     return 1
   fi
 }
@@ -111,18 +112,18 @@ download_release() {
   checksum_url="${archive_url}.sha256"
 
   command -v curl >/dev/null 2>&1 || {
-    printf 'curlが必要です。次を実行してください: sudo apt install curl\n' >&2
+    printf 'curl is required. Run: sudo apt install curl\n' >&2
     exit 1
   }
 
   TEMP_DIR="$(mktemp -d)"
-  printf '[1/3] リリース %s をダウンロードしています。\n' "$VERSION" >&2
+  printf '[1/3] Downloading release %s.\n' "$VERSION" >&2
   curl --fail --location --show-error --progress-bar \
     "$archive_url" --output "${TEMP_DIR}/mcserver-compose-kit.tar.gz" >&2
   curl --fail --location --silent --show-error \
     "$checksum_url" --output "${TEMP_DIR}/mcserver-compose-kit.tar.gz.sha256"
 
-  printf '[2/3] SHA-256を検証しています。\n' >&2
+  printf '[2/3] Verifying SHA-256.\n' >&2
   (
     cd "$TEMP_DIR"
     sha256sum --check mcserver-compose-kit.tar.gz.sha256
@@ -139,26 +140,26 @@ ensure_dependencies() {
   command -v whiptail >/dev/null 2>&1 || missing_packages+=(whiptail)
 
   if [[ "${#missing_packages[@]}" -gt 0 ]]; then
-    printf '不足しているパッケージ: %s\n' "${missing_packages[*]}"
-    read_from_terminal 'sudo aptでインストールしますか？ [Y/n]: ' answer
+    printf 'Missing packages: %s\n' "${missing_packages[*]}"
+    read_from_terminal 'Install them with sudo apt? [Y/n]: ' answer
     case "${answer:-y}" in
       y | Y | yes | YES)
         sudo apt-get update
         sudo apt-get install --yes "${missing_packages[@]}"
         ;;
       *)
-        printf '依存パッケージを導入してから再実行してください。\n' >&2
+        printf 'Install the required packages, then run the installer again.\n' >&2
         exit 1
         ;;
     esac
   fi
 
   command -v docker >/dev/null 2>&1 || {
-    printf 'WSLからdockerを実行できません。Docker DesktopのWSL Integrationを確認してください。\n' >&2
+    printf 'docker is unavailable in WSL. Check Docker Desktop WSL Integration.\n' >&2
     exit 1
   }
   docker compose version >/dev/null 2>&1 || {
-    printf 'WSLからdocker composeを実行できません。Docker Desktopの連携を確認してください。\n' >&2
+    printf 'docker compose is unavailable in WSL. Check Docker Desktop integration.\n' >&2
     exit 1
   }
 }
@@ -175,13 +176,14 @@ main() {
     source_dir="$(download_release)"
   fi
 
-  printf '[3/3] %s へインストールしています。\n' "$INSTALL_DIR"
+  printf '[3/3] Installing to %s.\n' "$INSTALL_DIR"
   mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "${CONFIG_DIR}/mcid-templates" "$BIN_DIR"
   install -m 755 "${source_dir}/new-minecraft-server.sh" "${INSTALL_DIR}/new-minecraft-server.sh"
   install -m 755 "${source_dir}/mcserver-kit" "${INSTALL_DIR}/mcserver-kit"
   install -m 755 "${source_dir}/setup.sh" "${INSTALL_DIR}/setup.sh"
   install -m 755 "${source_dir}/reset.sh" "${INSTALL_DIR}/reset.sh"
   install -m 755 "${source_dir}/config-tui.sh" "${INSTALL_DIR}/config-tui.sh"
+  install -m 755 "${source_dir}/lang.sh" "${INSTALL_DIR}/lang.sh"
   install -m 755 "${source_dir}/uninstall.sh" "${INSTALL_DIR}/uninstall.sh"
   install -m 644 "${source_dir}/config.example.yml" "${INSTALL_DIR}/config.example.yml"
   install -m 644 "${source_dir}/compose-example.yaml" "${INSTALL_DIR}/compose-example.yaml"
@@ -198,6 +200,10 @@ main() {
   if [[ ! -f "${CONFIG_DIR}/config.yml" ]]; then
     install -m 600 "${source_dir}/config.example.yml" "${CONFIG_DIR}/config.yml"
   fi
+  if [[ ! -f "$LANGUAGE_FILE" ]]; then
+    printf 'en\n' >"$LANGUAGE_FILE"
+    chmod 600 "$LANGUAGE_FILE"
+  fi
   if ! find "${CONFIG_DIR}/mcid-templates" -maxdepth 1 -type f -name '*.txt' -print -quit | grep -q .; then
     cp -a "${source_dir}/mcid-templates/." "${CONFIG_DIR}/mcid-templates/"
   fi
@@ -208,6 +214,7 @@ export MCSERVER_KIT_INSTALL_DIR="\${MCSERVER_KIT_INSTALL_DIR:-${INSTALL_DIR}}"
 export MCSERVER_KIT_CONFIG_DIR="\${MCSERVER_KIT_CONFIG_DIR:-${CONFIG_DIR}}"
 export MCSERVER_KIT_BIN_DIR="\${MCSERVER_KIT_BIN_DIR:-${BIN_DIR}}"
 export MCSERVER_KIT_SHELL_RC="\${MCSERVER_KIT_SHELL_RC:-${SHELL_RC}}"
+export MCSERVER_KIT_LANGUAGE_FILE="\${MCSERVER_KIT_LANGUAGE_FILE:-${LANGUAGE_FILE}}"
 export MCSERVER_KIT_CONFIG="\${MCSERVER_KIT_CONFIG:-${CONFIG_DIR}/config.yml}"
 export MCSERVER_KIT_MCID_TEMPLATE_DIR="\${MCSERVER_KIT_MCID_TEMPLATE_DIR:-${CONFIG_DIR}/mcid-templates}"
 exec "${INSTALL_DIR}/mcserver-kit" "\$@"
@@ -215,17 +222,19 @@ LAUNCHER
   chmod 755 "${BIN_DIR}/mcserver-kit"
   register_bin_path
 
-  printf '\nインストールが完了しました。\n'
-  printf '設定ファイル: %s\n' "${CONFIG_DIR}/config.yml"
-  printf 'PATH設定: %s\n' "$SHELL_RC"
+  printf '\nInstallation complete.\n'
+  printf 'Configuration: %s\n' "${CONFIG_DIR}/config.yml"
+  printf 'PATH configuration: %s\n' "$SHELL_RC"
   if [[ ":$PATH:" != *":${BIN_DIR}:"* ]]; then
-    printf '\n現在のターミナルへPATHを反映するには、次を実行してください:\n'
+    printf '\nTo update PATH in the current terminal, run:\n'
     printf '  source %q\n' "$SHELL_RC"
   fi
-  printf '\nサーバーを作成する前に、初回設定を実行してください:\n'
+  printf '\nBefore creating a server, run the initial setup:\n'
   printf '  mcserver-kit setup\n'
-  printf 'PATH反映前でも次のコマンドで実行できます:\n'
+  printf 'Before updating PATH, use:\n'
   printf '  %q setup\n' "${BIN_DIR}/mcserver-kit"
+  printf '\nTo use Japanese / 日本語に変更する場合:\n'
+  printf '  %q lang --ja\n' "${BIN_DIR}/mcserver-kit"
 }
 
 if [[ "${MCSERVER_KIT_INSTALLER_SKIP_MAIN:-false}" != 'true' ]]; then

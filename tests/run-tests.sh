@@ -59,6 +59,7 @@ test_version_resolution() {
 test_locales() {
   local english_help
   local japanese_help
+  local language_file="${TEST_TEMP_DIR}/language-preference"
 
   python3 "${REPO_ROOT}/scripts/validate-locales.py" "${REPO_ROOT}/locales" >/dev/null
   tests_run=$((tests_run + 1))
@@ -67,6 +68,17 @@ test_locales() {
   japanese_help="$(bash "${REPO_ROOT}/mcserver-kit" --lang ja --help)"
   assert_equal 'present' "$(grep -q 'Create a new server interactively' <<<"$english_help" && printf present)" 'English help is loaded from the locale catalog'
   assert_equal 'present' "$(grep -q '対話形式で新しいサーバーを作成' <<<"$japanese_help" && printf present)" 'Japanese help is loaded from the locale catalog'
+
+  english_help="$(LANG=ja_JP.UTF-8 MCSERVER_KIT_LANGUAGE_FILE="$language_file" bash "${REPO_ROOT}/mcserver-kit" --help)"
+  assert_equal 'present' "$(grep -q 'Create a new server interactively' <<<"$english_help" && printf present)" 'English is the default regardless of LANG'
+
+  MCSERVER_KIT_LANGUAGE_FILE="$language_file" bash "${REPO_ROOT}/mcserver-kit" lang --ja >/dev/null
+  japanese_help="$(MCSERVER_KIT_LANGUAGE_FILE="$language_file" bash "${REPO_ROOT}/mcserver-kit" --help)"
+  assert_equal 'ja' "$(cat "$language_file")" 'the language command persists Japanese'
+  assert_equal 'present' "$(grep -q '対話形式で新しいサーバーを作成' <<<"$japanese_help" && printf present)" 'the persisted language is used by later commands'
+
+  MCSERVER_KIT_LANGUAGE_FILE="$language_file" bash "${REPO_ROOT}/mcserver-kit" lang --en >/dev/null
+  assert_equal 'en' "$(cat "$language_file")" 'the language command persists English'
 }
 
 test_installer_version_selection() {
@@ -248,7 +260,7 @@ CONFIG
 
   printf '%s\n' \
     'spec-server' '' "$world_root" '' '' '' '' '' '' '' |
-    MCSERVER_KIT_CONFIG="$config_file" \
+  MCSERVER_KIT_CONFIG="$config_file" \
       bash "${REPO_ROOT}/new-minecraft-server.sh" >"$output_log" 2>&1
 
   assert_equal 'present' "$([[ -f "${target}/compose.yaml" ]] && printf present)" 'the creation flow writes compose.yaml'
@@ -282,6 +294,8 @@ test_local_installation() {
   assert_equal 'present' "$(grep -q 'mcserver-kit setup' <<<"$installed_help" && printf present)" 'the installed launcher exposes subcommand help'
   assert_equal 'present' "$([[ -f "${config_dir}/config.yml" ]] && printf present)" 'the installer creates the initial config'
   assert_equal 'present' "$([[ -f "${install_dir}/scripts/windows-dialog.ps1" ]] && printf present)" 'the installer includes the Windows dialog helper'
+  assert_equal 'present' "$([[ -x "${install_dir}/lang.sh" ]] && printf present)" 'the installer includes the language command'
+  assert_equal 'en' "$(cat "${config_dir}/language")" 'the installer defaults to English'
   assert_equal '1' "$(grep -Fxc '# >>> mcserver-kit PATH >>>' "$shell_rc")" 'the installer registers one managed PATH block'
   assert_equal 'present' "$(grep -q 'mcserver-kit setup' "$install_log" && printf present)" 'the installer instructs the user to run setup'
   assert_equal 'absent' "$(! grep -q '初回セットアップを開始' "$install_log" && printf absent)" 'the installer does not start setup automatically'
@@ -334,6 +348,8 @@ test_setup_command() {
   assert_equal 'present' "$(grep -q '^PlayerTwo$' "${template_dir}/default.txt" && printf present)" 'setup creates the default whitelist template'
   assert_equal '600' "$(stat -c '%a' "$config_file")" 'setup restricts config.yml permissions'
   assert_equal 'absent' "$(! grep -q 'playit-secret-for-test' "$setup_log" && printf absent)" 'setup does not print the Playit secret'
+  assert_equal 'absent' "$(! grep -q 'EULAHave' "$setup_log" && printf absent)" 'setup separates the EULA URL from its prompt'
+  assert_equal 'absent' "$(! grep -q 'finish.MCID' "$setup_log" && printf absent)" 'setup separates MCID instructions from the prompt'
 }
 
 test_reset_command() {
@@ -341,19 +357,23 @@ test_reset_command() {
   local config_dir="${temp_dir}/reset/config"
   local config_file="${config_dir}/config.yml"
   local template_dir="${config_dir}/mcid-templates"
+  local language_file="${config_dir}/language"
   local server_dir="${temp_dir}/reset/servers/keep-me"
 
   mkdir -p "$template_dir" "$server_dir"
   : >"$config_file"
+  printf 'ja\n' >"$language_file"
   : >"${template_dir}/default.txt"
   : >"${server_dir}/level.dat"
 
-  MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_CONFIG="$config_file" \
     MCSERVER_KIT_MCID_TEMPLATE_DIR="$template_dir" \
+    MCSERVER_KIT_LANGUAGE_FILE="$language_file" \
     bash "${REPO_ROOT}/mcserver-kit" --lang en reset --yes >/dev/null
 
   assert_equal 'absent' "$([[ ! -f "$config_file" ]] && printf absent)" 'reset removes config.yml'
   assert_equal 'absent' "$([[ ! -d "$template_dir" ]] && printf absent)" 'reset removes MCID templates'
+  assert_equal 'absent' "$([[ ! -f "$language_file" ]] && printf absent)" 'reset removes the persistent language preference'
   assert_equal 'present' "$([[ -f "${server_dir}/level.dat" ]] && printf present)" 'reset preserves created servers and worlds'
 }
 
