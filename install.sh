@@ -193,6 +193,12 @@ main() {
   install -m 644 "${source_dir}/config.example.yml" "${INSTALL_DIR}/config.example.yml"
   install -m 644 "${source_dir}/compose-example.yaml" "${INSTALL_DIR}/compose-example.yaml"
   install -m 644 "${source_dir}/README.md" "${INSTALL_DIR}/README.md"
+  if [[ -f "${source_dir}/README-JA.md" ]]; then
+    install -m 644 "${source_dir}/README-JA.md" "${INSTALL_DIR}/README-JA.md"
+  fi
+  if [[ -f "${source_dir}/CONTRIBUTING.md" ]]; then
+    install -m 644 "${source_dir}/CONTRIBUTING.md" "${INSTALL_DIR}/CONTRIBUTING.md"
+  fi
   install -m 644 "${source_dir}/LICENSE" "${INSTALL_DIR}/LICENSE"
   mkdir -p "${INSTALL_DIR}/scripts"
   install -m 755 "${source_dir}/scripts/detect-world-version.py" "${INSTALL_DIR}/scripts/detect-world-version.py"

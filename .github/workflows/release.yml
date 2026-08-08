@@ -46,6 +46,8 @@ jobs:
             config.example.yml \
             compose-example.yaml \
             README.md \
+            README-JA.md \
+            CONTRIBUTING.md \
             LICENSE \
             scripts \
             locales \
