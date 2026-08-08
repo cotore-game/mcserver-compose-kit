@@ -182,6 +182,7 @@ main() {
   mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "${CONFIG_DIR}/mcid-templates" "$BIN_DIR"
   install -m 755 "${source_dir}/new-minecraft-server.sh" "${INSTALL_DIR}/new-minecraft-server.sh"
   install -m 755 "${source_dir}/mcserver-kit" "${INSTALL_DIR}/mcserver-kit"
+  install -m 755 "${source_dir}/home-tui.sh" "${INSTALL_DIR}/home-tui.sh"
   install -m 755 "${source_dir}/setup.sh" "${INSTALL_DIR}/setup.sh"
   install -m 755 "${source_dir}/reset.sh" "${INSTALL_DIR}/reset.sh"
   install -m 755 "${source_dir}/config-tui.sh" "${INSTALL_DIR}/config-tui.sh"
