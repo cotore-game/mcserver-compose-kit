@@ -396,6 +396,47 @@ CONFIG
   assert_equal '600' "$(stat -c '%a' "$config_file")" 'config editor preserves restricted permissions'
 }
 
+test_server_management() {
+  local temp_dir="$1"
+  local root="${temp_dir}/server-management/servers"
+  local config_file="${temp_dir}/server-management/config.yml"
+  local fake_bin="${temp_dir}/server-management/bin"
+  local docker_log="${temp_dir}/server-management/docker.log"
+  local output
+
+  mkdir -p "${root}/alpha/data" "$fake_bin"
+  : >"${root}/alpha/compose.yaml"
+  cat >"$config_file" <<CONFIG
+paths:
+  server_root: "$root"
+CONFIG
+  cat >"${fake_bin}/docker" <<'DOCKER'
+#!/usr/bin/env bash
+printf '%s|%s\n' "$PWD" "$*" >>"$MCSERVER_KIT_TEST_DOCKER_LOG"
+if [[ "$*" == 'compose ps --status running --services' ]]; then
+  printf 'minecraft\n'
+fi
+DOCKER
+  chmod +x "${fake_bin}/docker"
+
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" bash "${REPO_ROOT}/mcserver-kit" list)"
+  assert_equal 'present' "$(grep -q 'alpha.*running' <<<"$output" && printf present)" 'list shows managed servers and their status'
+
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" bash "${REPO_ROOT}/mcserver-kit" server alpha start >/dev/null
+  assert_equal 'present' "$(grep -qF "${root}/alpha|compose config --quiet" "$docker_log" && printf present)" 'start validates compose in the selected server directory'
+  assert_equal 'present' "$(grep -qF "${root}/alpha|compose up -d" "$docker_log" && printf present)" 'start launches the selected server'
+
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" bash "${REPO_ROOT}/mcserver-kit" server alpha shutdown >/dev/null
+  assert_equal 'present' "$(grep -qF "${root}/alpha|compose stop" "$docker_log" && printf present)" 'shutdown stops the selected server without deleting its data'
+
+  assert_fails 'server IDs cannot traverse outside the configured root' \
+    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_CONFIG="$config_file" \
+      MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" bash "${REPO_ROOT}/mcserver-kit" server ../alpha status
+}
+
 main() {
   TEST_TEMP_DIR="$(mktemp -d)"
   trap cleanup EXIT
@@ -413,6 +454,7 @@ main() {
   test_setup_command "$TEST_TEMP_DIR"
   test_reset_command "$TEST_TEMP_DIR"
   test_config_value_editor "$TEST_TEMP_DIR"
+  test_server_management "$TEST_TEMP_DIR"
 
   printf 'PASS: %d specification tests, %d skipped\n' "$tests_run" "$tests_skipped"
 }

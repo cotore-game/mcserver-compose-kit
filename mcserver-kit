@@ -30,6 +30,8 @@ show_help() {
   mcserver-kit setup
   mcserver-kit config
   mcserver-kit templates
+  mcserver-kit list
+  mcserver-kit server <server-id> <action>
   mcserver-kit lang --ja|--en
   mcserver-kit reset [--yes]
   mcserver-kit uninstall [--purge]
@@ -43,6 +45,8 @@ HELP
   printf '  %-20s %s\n' setup "$(tr cli.setup)"
   printf '  %-20s %s\n' config "$(tr cli.config)"
   printf '  %-20s %s\n' templates "$(tr cli.templates)"
+  printf '  %-20s %s\n' list 'List managed servers'
+  printf '  %-20s %s\n' server 'Start, stop, restart, inspect, or configure a server'
   printf '  %-20s %s\n' lang "$(tr cli.lang)"
   printf '  %-20s %s\n' reset "$(tr cli.reset)"
   printf '  %-20s %s\n' uninstall "$(tr cli.uninstall)"
@@ -74,6 +78,14 @@ case "$command_name" in
   templates)
     shift
     exec "${SCRIPT_DIR}/config-tui.sh" templates "$@"
+    ;;
+  list)
+    shift
+    exec "${SCRIPT_DIR}/server-manager.sh" list "$@"
+    ;;
+  server)
+    shift
+    exec "${SCRIPT_DIR}/server-manager.sh" server "$@"
     ;;
   lang)
     shift
