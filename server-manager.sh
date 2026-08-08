@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# `tr` is the repository translation helper, and load_messages takes no CLI args.
+# shellcheck disable=SC2020,SC2119
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,6 +18,8 @@ die() {
 
 expand_path() {
   local value="$1"
+  # This is a literal input prefix, not shell tilde expansion.
+  # shellcheck disable=SC2088
   local tilde_prefix='~/'
   value="${value//\$\{HOME\}/$HOME}"
   if [[ "${value:0:2}" == "$tilde_prefix" ]]; then

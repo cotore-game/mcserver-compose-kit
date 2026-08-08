@@ -95,6 +95,8 @@ test_installer_version_selection() {
   assert_equal $'v0.2.0\nhttps://github.com/cotore-game/mcserver-compose-kit/releases/download/v0.2.0' \
     "$installer_output" 'installer accepts a pinned release version'
 
+  # The child shell intentionally expands $1.
+  # shellcheck disable=SC2016
   assert_fails 'installer rejects invalid release versions' \
     env MCSERVER_KIT_INSTALLER_SKIP_MAIN=true bash -c \
       'source "$1"; parse_arguments --version latest-main' _ "${REPO_ROOT}/install.sh"

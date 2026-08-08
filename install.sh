@@ -79,6 +79,8 @@ read_from_terminal() {
   local variable_name="$2"
 
   if [[ -r /dev/tty ]]; then
+    # read intentionally receives the caller's variable name.
+    # shellcheck disable=SC2229
     IFS= read -r -p "$prompt" "$variable_name" </dev/tty
   else
     printf 'Cannot open a terminal for interactive input. Run this again from a regular WSL terminal.\n' >&2

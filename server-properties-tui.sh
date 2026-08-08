@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# `tr` is the repository translation helper, and load_messages takes no CLI args.
+# shellcheck disable=SC2020,SC2119
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
