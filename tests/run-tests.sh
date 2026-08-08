@@ -437,6 +437,29 @@ DOCKER
       MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" bash "${REPO_ROOT}/mcserver-kit" server ../alpha status
 }
 
+test_server_property_editor() {
+  local temp_dir="$1"
+  local properties="${temp_dir}/property-editor/server.properties"
+  mkdir -p "$(dirname -- "$properties")"
+  cat >"$properties" <<'PROPERTIES'
+#Minecraft server properties
+difficulty=easy
+pvp=true
+view-distance=10
+PROPERTIES
+  chmod 600 "$properties"
+
+  assert_equal 'easy' "$(python3 "${REPO_ROOT}/scripts/server-property.py" get "$properties" difficulty)" 'property editor reads an existing value'
+  python3 "${REPO_ROOT}/scripts/server-property.py" set "$properties" difficulty hard
+  assert_equal 'hard' "$(python3 "${REPO_ROOT}/scripts/server-property.py" get "$properties" difficulty)" 'property editor replaces an existing value'
+  python3 "${REPO_ROOT}/scripts/server-property.py" set "$properties" simulation-distance 8
+  assert_equal '8' "$(python3 "${REPO_ROOT}/scripts/server-property.py" get "$properties" simulation-distance)" 'property editor appends a missing value'
+  assert_equal 'present' "$(grep -q '^#Minecraft server properties$' "$properties" && printf present)" 'property editor preserves comments'
+  assert_equal '600' "$(stat -c '%a' "$properties")" 'property editor preserves file permissions'
+  assert_fails 'property values cannot contain newlines' \
+    python3 "${REPO_ROOT}/scripts/server-property.py" set "$properties" motd $'bad\nvalue'
+}
+
 main() {
   TEST_TEMP_DIR="$(mktemp -d)"
   trap cleanup EXIT
@@ -455,6 +478,7 @@ main() {
   test_reset_command "$TEST_TEMP_DIR"
   test_config_value_editor "$TEST_TEMP_DIR"
   test_server_management "$TEST_TEMP_DIR"
+  test_server_property_editor "$TEST_TEMP_DIR"
 
   printf 'PASS: %d specification tests, %d skipped\n' "$tests_run" "$tests_skipped"
 }
