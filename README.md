@@ -325,6 +325,7 @@ MCPacksなどのMinecraft向け配信サービスを利用できます。
 ~/minecraftServer/<server-id>/
 ├─ compose.yaml
 ├─ .env
+├─ server.env
 ├─ README.txt
 └─ data/
    └─ world/
@@ -332,6 +333,7 @@ MCPacksなどのMinecraft向け配信サービスを利用できます。
 
 - `compose.yaml`：Dockerの起動設定
 - `.env`：そのサーバー用設定とPlayit秘密鍵。権限`600`
+- `server.env`：TUIで管理するMinecraft設定の正本。権限`600`
 - `README.txt`：起動・停止手順
 - `data/`：ワールド、プレイヤー情報、進行状況
 
@@ -358,15 +360,17 @@ mcserver-kit server <server-id> down
 
 `start`は`docker compose config --quiet`で構成を検証してから`up -d`を実行します。`stop`と`shutdown`はコンテナを保持したまま停止し、`down`はコンテナとネットワークを削除します。いずれも`data/`のワールドデータは削除しません。
 
-一度起動して`data/server.properties`が生成されたサーバーは、停止後にTUIから設定できます。
+サーバーのMinecraft設定はTUIから一元管理できます。稼働中でも編集でき、保存後に今すぐ再作成・再起動して反映するか確認します。
 
 ```bash
 mcserver-kit server <server-id> properties
 ```
 
-難易度、ゲームモード、PvP、描画距離、シミュレーション距離、放置タイムアウト、ネザーやMob/NPCの生成などを編集できます。稼働中の直接編集はサーバー終了時に上書きされる可能性があるため、TUIは起動中の編集を拒否します。
+対象はMOTD、難易度、ゲームモード、最大人数、オンラインモード、ホワイトリスト・OP、飛行、コマンドブロック、PvP、描画・シミュレーション距離、スポーン保護、ネザーやMob/NPC生成、リソースパックなどです。
 
-MOTD、最大人数、オンラインモード、ホワイトリスト、コマンドブロック、飛行、スポーン保護はComposeの環境変数で管理されているため、このproperties画面の対象外です。
+設定の正本は各サーバーの`server.env`です。Composeがこれをitzg/minecraft-serverへ渡し、起動時に`data/server.properties`へ反映します。TUIは`.env`と`server.properties`の両方へ同じ値を書かないため、設定の同期ずれを避けられます。
+
+従来形式の生成済みサーバーは、初回にproperties画面を開いたときに移行するか確認します。同意すると元のComposeを`compose.yaml.mcserver-kit.bak`へ保存し、現在の`.env`、Compose環境変数、`server.properties`から`server.env`へ移行します。キャンセルした場合は変更しません。
 
 ## 作成後
 
