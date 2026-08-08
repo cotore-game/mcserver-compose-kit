@@ -234,7 +234,7 @@ LAUNCHER
   printf 'Before updating PATH, use:\n'
   printf '  %q setup\n' "${BIN_DIR}/mcserver-kit"
   printf '\nTo use Japanese / 日本語に変更する場合:\n'
-  printf '  %q lang --ja\n' "${BIN_DIR}/mcserver-kit"
+  printf '  mcserver-kit lang --ja\n'
 }
 
 if [[ "${MCSERVER_KIT_INSTALLER_SKIP_MAIN:-false}" != 'true' ]]; then
