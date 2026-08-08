@@ -24,16 +24,16 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes shellcheck zip unzip
 
       - name: Check Bash syntax
-        run: bash -n mcserver-kit new-minecraft-server.sh setup.sh reset.sh config-tui.sh lang.sh install.sh uninstall.sh tests/run-tests.sh
+        run: bash -n mcserver-kit new-minecraft-server.sh setup.sh reset.sh config-tui.sh server-manager.sh server-properties-tui.sh lang.sh install.sh uninstall.sh tests/run-tests.sh
 
       - name: Check Python syntax
-        run: python3 -m py_compile scripts/config-value.py scripts/detect-world-version.py scripts/validate-locales.py
+        run: python3 -m py_compile scripts/config-value.py scripts/detect-world-version.py scripts/server-property.py scripts/validate-locales.py
 
       - name: Validate locale catalogs
         run: python3 scripts/validate-locales.py
 
       - name: Run ShellCheck
-        run: shellcheck -x mcserver-kit new-minecraft-server.sh setup.sh reset.sh config-tui.sh lang.sh install.sh uninstall.sh tests/run-tests.sh
+        run: shellcheck -x mcserver-kit new-minecraft-server.sh setup.sh reset.sh config-tui.sh server-manager.sh server-properties-tui.sh lang.sh install.sh uninstall.sh tests/run-tests.sh
 
       - name: Run specification tests
         run: bash tests/run-tests.sh

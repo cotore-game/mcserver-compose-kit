@@ -5,8 +5,12 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${MCSERVER_KIT_CONFIG:-${HOME}/.config/mcserver-compose-kit/config.yml}"
 CONFIG_VALUE="${SCRIPT_DIR}/scripts/config-value.py"
 
+# shellcheck source=scripts/i18n.sh
+source "${SCRIPT_DIR}/scripts/i18n.sh"
+load_messages
+
 die() {
-  printf 'Error: %s\n' "$*" >&2
+  printf '%s: %s\n' "$(tr common.error)" "$*" >&2
   exit 1
 }
 
@@ -22,14 +26,14 @@ expand_path() {
 
 server_root() {
   local configured
-  [[ -f "$CONFIG_FILE" ]] || die "Configuration not found. Run mcserver-kit setup first."
+  [[ -f "$CONFIG_FILE" ]] || die "$(tr server.config_missing)"
   configured="$(python3 "$CONFIG_VALUE" get "$CONFIG_FILE" paths server_root 2>/dev/null)" ||
-    die "paths.server_root is missing from the configuration."
+    die "$(tr server.root_missing)"
   expand_path "$configured"
 }
 
 validate_server_id() {
-  [[ "$1" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "Invalid server ID: $1"
+  [[ "$1" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "$(tr server.invalid_id "$1")"
 }
 
 resolve_server_dir() {
@@ -37,8 +41,8 @@ resolve_server_dir() {
   local root
   validate_server_id "$id"
   root="$(server_root)"
-  [[ -d "${root}/${id}" ]] || die "Server not found: ${id}"
-  [[ -f "${root}/${id}/compose.yaml" ]] || die "compose.yaml not found for server: ${id}"
+  [[ -d "${root}/${id}" ]] || die "$(tr server.not_found "$id")"
+  [[ -f "${root}/${id}/compose.yaml" ]] || die "$(tr server.compose_missing "$id")"
   printf '%s' "${root}/${id}"
 }
 
@@ -47,7 +51,7 @@ list_servers() {
   local directory
   local found=false
   root="$(server_root)"
-  printf '%-28s %s\n' 'SERVER ID' 'STATUS'
+  printf '%-28s %s\n' "$(tr server.list_id)" "$(tr server.list_status)"
   if [[ ! -d "$root" ]]; then
     return
   fi
@@ -58,11 +62,11 @@ list_servers() {
     printf '%-28s ' "$(basename "$directory")"
     (
       cd "$directory"
-      docker compose ps --status running --services 2>/dev/null | grep -qx minecraft && printf 'running\n' || printf 'stopped\n'
+      docker compose ps --status running --services 2>/dev/null | grep -qx minecraft && printf '%s\n' "$(tr server.running)" || printf '%s\n' "$(tr server.stopped)"
     )
   done
   shopt -u nullglob
-  [[ "$found" == true ]] || printf '%s\n' '(no servers)'
+  [[ "$found" == true ]] || printf '%s\n' "$(tr server.none)"
 }
 
 compose_in() {
@@ -78,24 +82,24 @@ manage_server() {
   local id="${1-}"
   local action="${2-}"
   local directory
-  [[ -n "$id" && -n "$action" ]] || die "Usage: mcserver-kit server SERVER_ID start|stop|restart|status|logs|down|properties"
+  [[ -n "$id" && -n "$action" ]] || die "$(tr server.usage)"
   directory="$(resolve_server_dir "$id")"
   shift 2
 
   case "$action" in
     start)
-      printf 'Validating Docker Compose configuration for %s...\n' "$id"
+      printf '%s\n' "$(tr server.validating "$id")"
       compose_in "$directory" config --quiet
-      printf 'Starting %s...\n' "$id"
+      printf '%s\n' "$(tr server.starting "$id")"
       compose_in "$directory" up -d
       compose_in "$directory" ps
       ;;
     stop | shutdown)
-      printf 'Stopping %s...\n' "$id"
+      printf '%s\n' "$(tr server.stopping "$id")"
       compose_in "$directory" stop
       ;;
     restart)
-      printf 'Restarting %s...\n' "$id"
+      printf '%s\n' "$(tr server.restarting "$id")"
       compose_in "$directory" restart
       compose_in "$directory" ps
       ;;
@@ -110,14 +114,14 @@ manage_server() {
       fi
       ;;
     down)
-      printf 'Removing containers and networks for %s. World data is preserved.\n' "$id"
+      printf '%s\n' "$(tr server.down "$id")"
       compose_in "$directory" down
       ;;
     properties)
       exec "${SCRIPT_DIR}/server-properties-tui.sh" "$id" "$directory"
       ;;
     *)
-      die "Unknown server action: ${action}"
+      die "$(tr server.unknown_action "$action")"
       ;;
   esac
 }
@@ -129,7 +133,7 @@ main() {
       shift
       manage_server "$@"
       ;;
-    *) die "Usage: server-manager.sh list | server SERVER_ID ACTION" ;;
+    *) die "$(tr server.manager_usage)" ;;
   esac
 }
 

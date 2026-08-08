@@ -231,7 +231,7 @@ AnotherPlayer
 ## 使用方法
 
 ```bash
-./new-minecraft-server.sh
+mcserver-kit create
 ```
 
 入力する内容：
@@ -334,6 +334,39 @@ MCPacksなどのMinecraft向け配信サービスを利用できます。
 - `.env`：そのサーバー用設定とPlayit秘密鍵。権限`600`
 - `README.txt`：起動・停止手順
 - `data/`：ワールド、プレイヤー情報、進行状況
+
+## サーバー管理
+
+管理対象サーバーと起動状態を一覧表示します。
+
+```bash
+mcserver-kit list
+```
+
+サーバーIDを指定して、作業ディレクトリへ手動で移動せずに操作できます。
+
+```bash
+mcserver-kit server <server-id> start
+mcserver-kit server <server-id> stop
+mcserver-kit server <server-id> shutdown
+mcserver-kit server <server-id> restart
+mcserver-kit server <server-id> status
+mcserver-kit server <server-id> logs
+mcserver-kit server <server-id> logs --no-follow
+mcserver-kit server <server-id> down
+```
+
+`start`は`docker compose config --quiet`で構成を検証してから`up -d`を実行します。`stop`と`shutdown`はコンテナを保持したまま停止し、`down`はコンテナとネットワークを削除します。いずれも`data/`のワールドデータは削除しません。
+
+一度起動して`data/server.properties`が生成されたサーバーは、停止後にTUIから設定できます。
+
+```bash
+mcserver-kit server <server-id> properties
+```
+
+難易度、ゲームモード、PvP、描画距離、シミュレーション距離、放置タイムアウト、ネザーやMob/NPCの生成などを編集できます。稼働中の直接編集はサーバー終了時に上書きされる可能性があるため、TUIは起動中の編集を拒否します。
+
+MOTD、最大人数、オンラインモード、ホワイトリスト、コマンドブロック、飛行、スポーン保護はComposeの環境変数で管理されているため、このproperties画面の対象外です。
 
 ## 作成後
 

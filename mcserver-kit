@@ -45,8 +45,8 @@ HELP
   printf '  %-20s %s\n' setup "$(tr cli.setup)"
   printf '  %-20s %s\n' config "$(tr cli.config)"
   printf '  %-20s %s\n' templates "$(tr cli.templates)"
-  printf '  %-20s %s\n' list 'List managed servers'
-  printf '  %-20s %s\n' server 'Start, stop, restart, inspect, or configure a server'
+  printf '  %-20s %s\n' list "$(tr cli.list)"
+  printf '  %-20s %s\n' server "$(tr cli.server)"
   printf '  %-20s %s\n' lang "$(tr cli.lang)"
   printf '  %-20s %s\n' reset "$(tr cli.reset)"
   printf '  %-20s %s\n' uninstall "$(tr cli.uninstall)"

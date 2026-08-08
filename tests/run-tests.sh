@@ -68,6 +68,7 @@ test_locales() {
   japanese_help="$(bash "${REPO_ROOT}/mcserver-kit" --lang ja --help)"
   assert_equal 'present' "$(grep -q 'Create a new server interactively' <<<"$english_help" && printf present)" 'English help is loaded from the locale catalog'
   assert_equal 'present' "$(grep -q '対話形式で新しいサーバーを作成' <<<"$japanese_help" && printf present)" 'Japanese help is loaded from the locale catalog'
+  assert_equal 'present' "$(grep -q '管理対象サーバーと状態' <<<"$japanese_help" && printf present)" 'server management help is translated'
 
   english_help="$(LANG=ja_JP.UTF-8 MCSERVER_KIT_LANGUAGE_FILE="$language_file" bash "${REPO_ROOT}/mcserver-kit" --help)"
   assert_equal 'present' "$(grep -q 'Create a new server interactively' <<<"$english_help" && printf present)" 'English is the default regardless of LANG'
@@ -295,6 +296,9 @@ test_local_installation() {
   assert_equal 'present' "$([[ -f "${config_dir}/config.yml" ]] && printf present)" 'the installer creates the initial config'
   assert_equal 'present' "$([[ -f "${install_dir}/scripts/windows-dialog.ps1" ]] && printf present)" 'the installer includes the Windows dialog helper'
   assert_equal 'present' "$([[ -x "${install_dir}/lang.sh" ]] && printf present)" 'the installer includes the language command'
+  assert_equal 'present' "$([[ -x "${install_dir}/server-manager.sh" ]] && printf present)" 'the installer includes the server manager'
+  assert_equal 'present' "$([[ -x "${install_dir}/server-properties-tui.sh" ]] && printf present)" 'the installer includes the properties TUI'
+  assert_equal 'present' "$([[ -x "${install_dir}/scripts/server-property.py" ]] && printf present)" 'the installer includes the property editor'
   assert_equal 'en' "$(cat "${config_dir}/language")" 'the installer defaults to English'
   assert_equal '1' "$(grep -Fxc '# >>> mcserver-kit PATH >>>' "$shell_rc")" 'the installer registers one managed PATH block'
   assert_equal 'present' "$(grep -q 'mcserver-kit setup' "$install_log" && printf present)" 'the installer instructs the user to run setup'
@@ -350,6 +354,7 @@ test_setup_command() {
   assert_equal 'absent' "$(! grep -q 'playit-secret-for-test' "$setup_log" && printf absent)" 'setup does not print the Playit secret'
   assert_equal 'absent' "$(! grep -q 'EULAHave' "$setup_log" && printf absent)" 'setup separates the EULA URL from its prompt'
   assert_equal 'absent' "$(! grep -q 'finish.MCID' "$setup_log" && printf absent)" 'setup separates MCID instructions from the prompt'
+  assert_equal '10' "$(tail -c 1 "$setup_log" | od -An -tu1 | tr -d ' ')" 'setup output ends with a newline'
 }
 
 test_reset_command() {
@@ -419,21 +424,21 @@ fi
 DOCKER
   chmod +x "${fake_bin}/docker"
 
-  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_CONFIG="$config_file" \
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
     MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" bash "${REPO_ROOT}/mcserver-kit" list)"
   assert_equal 'present' "$(grep -q 'alpha.*running' <<<"$output" && printf present)" 'list shows managed servers and their status'
 
-  PATH="${fake_bin}:$PATH" MCSERVER_KIT_CONFIG="$config_file" \
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
     MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" bash "${REPO_ROOT}/mcserver-kit" server alpha start >/dev/null
   assert_equal 'present' "$(grep -qF "${root}/alpha|compose config --quiet" "$docker_log" && printf present)" 'start validates compose in the selected server directory'
   assert_equal 'present' "$(grep -qF "${root}/alpha|compose up -d" "$docker_log" && printf present)" 'start launches the selected server'
 
-  PATH="${fake_bin}:$PATH" MCSERVER_KIT_CONFIG="$config_file" \
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
     MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" bash "${REPO_ROOT}/mcserver-kit" server alpha shutdown >/dev/null
   assert_equal 'present' "$(grep -qF "${root}/alpha|compose stop" "$docker_log" && printf present)" 'shutdown stops the selected server without deleting its data'
 
   assert_fails 'server IDs cannot traverse outside the configured root' \
-    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_CONFIG="$config_file" \
+    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
       MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" bash "${REPO_ROOT}/mcserver-kit" server ../alpha status
 }
 
