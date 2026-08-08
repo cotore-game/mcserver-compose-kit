@@ -33,12 +33,15 @@ mcserver-kit
 主なサブコマンド：
 
 ```bash
-mcserver-kit                 # 新しいサーバーを作成
+mcserver-kit                 # 対話式ホーム画面を開く
+mcserver-kit create          # 新しいサーバーを作成
 mcserver-kit setup           # 初回設定・再設定
 mcserver-kit uninstall       # 設定を残してアンインストール
 mcserver-kit uninstall --purge
 mcserver-kit --help
 ```
+
+引数なしで起動すると、ASCIIアートロゴ付きのホーム画面から、サーバー一覧・作成・起動・停止・ログ・設定・言語・診断を選べます。矢印キーで項目を選択し、Enterで決定します。スクリプトや自動化では従来どおり各サブコマンドを直接利用できます。
 
 ### Language / 言語
 
