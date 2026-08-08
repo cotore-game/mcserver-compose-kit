@@ -268,6 +268,9 @@ CONFIG
 
   assert_equal 'present' "$([[ -f "${target}/compose.yaml" ]] && printf present)" 'the creation flow writes compose.yaml'
   assert_equal 'present' "$([[ -f "${target}/.env" ]] && printf present)" 'the creation flow writes .env'
+  assert_equal 'present' "$([[ -f "${target}/server.env" ]] && printf present)" 'the creation flow writes unified Minecraft settings'
+  assert_equal 'present' "$(grep -q '^    env_file:$' "${target}/compose.yaml" && printf present)" 'Compose loads unified Minecraft settings'
+  assert_equal 'survival' "$(python3 "${REPO_ROOT}/scripts/server-config.py" get "${target}/server.env" MODE)" 'new servers default to survival mode'
   assert_equal 'present' "$([[ -f "${target}/data/world/level.dat" ]] && printf present)" 'the creation flow copies the world'
   assert_equal 'present' "$(grep -q '\[5/5\].*Docker Compose設定を検証' "$output_log" && printf present)" 'the creation flow reports Compose validation progress'
 }
@@ -300,13 +303,14 @@ test_local_installation() {
   assert_equal 'present' "$([[ -x "${install_dir}/lang.sh" ]] && printf present)" 'the installer includes the language command'
   assert_equal 'present' "$([[ -x "${install_dir}/server-manager.sh" ]] && printf present)" 'the installer includes the server manager'
   assert_equal 'present' "$([[ -x "${install_dir}/server-properties-tui.sh" ]] && printf present)" 'the installer includes the properties TUI'
-  assert_equal 'present' "$([[ -x "${install_dir}/scripts/server-property.py" ]] && printf present)" 'the installer includes the property editor'
+  assert_equal 'present' "$([[ -x "${install_dir}/scripts/server-config.py" ]] && printf present)" 'the installer includes the unified server settings editor'
   assert_equal 'en' "$(cat "${config_dir}/language")" 'the installer defaults to English'
   assert_equal '1' "$(grep -Fxc '# >>> mcserver-kit PATH >>>' "$shell_rc")" 'the installer registers one managed PATH block'
   assert_equal 'present' "$(grep -q 'mcserver-kit setup' "$install_log" && printf present)" 'the installer instructs the user to run setup'
   assert_equal 'absent' "$(! grep -q '初回セットアップを開始' "$install_log" && printf absent)" 'the installer does not start setup automatically'
 
   printf '\n# preserve-on-update\n' >>"${config_dir}/config.yml"
+  : >"${install_dir}/scripts/server-property.py"
   PATH="${fake_bin}:$PATH" \
     MCSERVER_KIT_INSTALL_DIR="$install_dir" \
     MCSERVER_KIT_CONFIG_DIR="$config_dir" \
@@ -315,6 +319,7 @@ test_local_installation() {
     bash "${REPO_ROOT}/install.sh" >>"$install_log"
   assert_equal 'present' "$(grep -q 'preserve-on-update' "${config_dir}/config.yml" && printf present)" 'updating preserves config.yml'
   assert_equal '1' "$(grep -Fxc '# >>> mcserver-kit PATH >>>' "$shell_rc")" 'updating does not duplicate the PATH block'
+  assert_equal 'absent' "$([[ ! -e "${install_dir}/scripts/server-property.py" ]] && printf absent)" 'updating removes the obsolete property editor'
 
   "${bin_dir}/mcserver-kit" uninstall >>"$install_log"
   assert_equal 'absent' "$([[ ! -d "$install_dir" ]] && printf absent)" 'the uninstaller removes installed program files'
@@ -446,25 +451,80 @@ DOCKER
 
 test_server_property_editor() {
   local temp_dir="$1"
-  local properties="${temp_dir}/property-editor/server.properties"
+  local server_dir="${temp_dir}/property-editor/server"
+  local properties="${server_dir}/data/server.properties"
+  local server_env="${server_dir}/server.env"
+  local fake_bin="${temp_dir}/property-editor/bin"
+  local whiptail_state="${temp_dir}/property-editor/whiptail-state"
   mkdir -p "$(dirname -- "$properties")"
+  cat >"${server_dir}/.env" <<'ENV'
+MC_MOTD="Existing MOTD"
+MC_WHITELIST="Alice,Bob"
+ENV
+  cat >"${server_dir}/compose.yaml" <<'COMPOSE'
+services:
+  minecraft:
+    image: itzg/minecraft-server:java21
+    environment:
+      EULA: "TRUE"
+      DIFFICULTY: "normal"
+      MAX_PLAYERS: "12"
+      MOTD: "${MC_MOTD}"
+      ALLOW_FLIGHT: "TRUE"
+    volumes:
+      - ./data:/data
+COMPOSE
   cat >"$properties" <<'PROPERTIES'
 #Minecraft server properties
 difficulty=easy
 pvp=true
 view-distance=10
 PROPERTIES
-  chmod 600 "$properties"
 
-  assert_equal 'easy' "$(python3 "${REPO_ROOT}/scripts/server-property.py" get "$properties" difficulty)" 'property editor reads an existing value'
-  python3 "${REPO_ROOT}/scripts/server-property.py" set "$properties" difficulty hard
-  assert_equal 'hard' "$(python3 "${REPO_ROOT}/scripts/server-property.py" get "$properties" difficulty)" 'property editor replaces an existing value'
-  python3 "${REPO_ROOT}/scripts/server-property.py" set "$properties" simulation-distance 8
-  assert_equal '8' "$(python3 "${REPO_ROOT}/scripts/server-property.py" get "$properties" simulation-distance)" 'property editor appends a missing value'
-  assert_equal 'present' "$(grep -q '^#Minecraft server properties$' "$properties" && printf present)" 'property editor preserves comments'
-  assert_equal '600' "$(stat -c '%a' "$properties")" 'property editor preserves file permissions'
-  assert_fails 'property values cannot contain newlines' \
-    python3 "${REPO_ROOT}/scripts/server-property.py" set "$properties" motd $'bad\nvalue'
+  python3 "${REPO_ROOT}/scripts/server-config.py" migrate "$server_dir"
+  assert_equal 'present' "$([[ -f "${server_dir}/compose.yaml.mcserver-kit.bak" ]] && printf present)" 'migration backs up the original Compose file'
+  assert_equal 'present' "$(grep -q '^      DIFFICULTY:' "${server_dir}/compose.yaml.mcserver-kit.bak" && printf present)" 'the migration backup preserves original settings'
+  assert_equal 'Existing MOTD' "$(python3 "${REPO_ROOT}/scripts/server-config.py" get "$server_env" MOTD)" 'migration resolves existing Compose interpolation'
+  assert_equal 'normal' "$(python3 "${REPO_ROOT}/scripts/server-config.py" get "$server_env" DIFFICULTY)" 'migration prefers existing Compose settings over server.properties'
+  assert_equal 'true' "$(python3 "${REPO_ROOT}/scripts/server-config.py" get "$server_env" PVP)" 'migration imports properties not managed by Compose'
+  assert_equal 'Alice,Bob' "$(python3 "${REPO_ROOT}/scripts/server-config.py" get "$server_env" WHITELIST)" 'migration imports the existing whitelist'
+  assert_equal 'true' "$(python3 "${REPO_ROOT}/scripts/server-config.py" get "$server_env" ENABLE_WHITELIST)" 'migration keeps a configured whitelist enabled'
+  assert_equal 'present' "$(grep -q '^    env_file:$' "${server_dir}/compose.yaml" && printf present)" 'migration adds server.env to Compose'
+  assert_equal 'absent' "$(! grep -q '^      DIFFICULTY:' "${server_dir}/compose.yaml" && printf absent)" 'migration removes conflicting Compose property values'
+  assert_equal '600' "$(stat -c '%a' "$server_env")" 'unified settings are private'
+
+  python3 "${REPO_ROOT}/scripts/server-config.py" migrate "$server_dir"
+  assert_equal '1' "$(grep -c '^      - server.env$' "${server_dir}/compose.yaml")" 'migration is idempotent'
+
+  python3 "${REPO_ROOT}/scripts/server-config.py" set "$server_env" DIFFICULTY hard
+  assert_equal 'hard' "$(python3 "${REPO_ROOT}/scripts/server-config.py" get "$server_env" DIFFICULTY)" 'the settings editor updates server.env atomically'
+  assert_equal 'present' "$(grep -q '^difficulty=easy$' "$properties" && printf present)" 'migration does not directly rewrite server.properties'
+
+  mkdir -p "$fake_bin"
+  cat >"${fake_bin}/docker" <<'DOCKER'
+#!/usr/bin/env bash
+exit 0
+DOCKER
+  cat >"${fake_bin}/whiptail" <<'WHIPTAIL'
+#!/usr/bin/env bash
+case " $* " in
+  *' --inputbox '*) printf 'Unified MOTD' >&2 ;;
+  *' --yesno '*) exit 1 ;;
+  *' --menu '*)
+    count=0
+    [[ -f "$MCSERVER_KIT_TEST_WHIPTAIL_STATE" ]] && count="$(cat "$MCSERVER_KIT_TEST_WHIPTAIL_STATE")"
+    count=$((count + 1))
+    printf '%s\n' "$count" >"$MCSERVER_KIT_TEST_WHIPTAIL_STATE"
+    if [[ "$count" -eq 1 ]]; then printf 'MOTD' >&2; else printf '__exit' >&2; fi
+    ;;
+  *) exit 0 ;;
+esac
+WHIPTAIL
+  chmod +x "${fake_bin}/docker" "${fake_bin}/whiptail"
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+    MCSERVER_KIT_TEST_WHIPTAIL_STATE="$whiptail_state" \
+    bash "${REPO_ROOT}/server-properties-tui.sh" alpha "$server_dir" >/dev/null
+  assert_equal 'Unified MOTD' "$(python3 "${REPO_ROOT}/scripts/server-config.py" get "$server_env" MOTD)" 'the properties TUI updates unified settings'
 }
 
 main() {
