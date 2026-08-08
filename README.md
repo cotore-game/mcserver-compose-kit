@@ -1,354 +1,154 @@
-# mcserver-tool-kit
+# mcserver-compose-kit
 
-WSL2とDocker Desktopを使い、Minecraft Javaの配布ワールドから独立したサーバー構成を作る対話式ツールです。
+[日本語](README-JA.md) | English
 
-サーバーごとに`compose.yaml`、`.env`、`data/world`を生成し、確認後にそのまま起動することもできます。
+`mcserver-compose-kit` creates and manages Minecraft Java Edition servers from WSL2. It is aimed at downloaded adventure maps and other prebuilt worlds, but it also works without an imported world.
 
-## 簡単インストール
+The toolkit creates an independent Docker Compose project for each server. Run `mcserver-kit` to open the terminal dashboard, or use its subcommands directly from scripts.
 
-Docker Desktop、WSL2、Docker DesktopのWSL Integrationが設定済みであることを前提とします。
+## What it does
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | bash
-```
+- Imports a world from a folder or ZIP archive
+- Finds `level.dat` inside common nested archive layouts
+- Detects the saved Minecraft version and suggests a matching Java image
+- Creates a separate `compose.yaml`, `.env`, `server.env`, and `data/` directory for each server
+- Manages start, stop, restart, status, logs, and server settings
+- Reuses MCID templates for the whitelist and operator list
+- Supports Playit and server resource packs
+- Uses Windows file dialogs and a Windows IME-friendly MOTD editor when available
+- Provides English and Japanese messages through JSON locale catalogs
 
-バージョンを固定する場合は、`bash -s --`以降へ指定します。
+## Requirements
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | \
-  bash -s -- --version v0.2.0
-```
-
-`MCSERVER_KIT_VERSION=v0.2.0`環境変数でも指定できます。省略時は最新Releaseを使用します。
-
-インストーラーは最新のGitHub Releaseを取得してSHA-256を検証します。不足している`python3`や`unzip`は、確認後に`sudo apt`で導入できます。インストール後は次で起動します。
-
-インストーラーは`~/.bashrc`へ管理済みのPATH設定を追加します。現在開いているターミナルには自動反映しないため、表示された`source ~/.bashrc`を実行するか、ターミナルを開き直してください。インストール直後にsetupは自動起動しません。
-
-```bash
-mcserver-kit setup
-mcserver-kit
-```
-
-主なサブコマンド：
-
-```bash
-mcserver-kit                 # 対話式ホーム画面を開く
-mcserver-kit create          # 新しいサーバーを作成
-mcserver-kit setup           # 初回設定・再設定
-mcserver-kit uninstall       # 設定を残してアンインストール
-mcserver-kit uninstall --purge
-mcserver-kit --help
-```
-
-引数なしで起動すると、ASCIIアートロゴ付きのホーム画面から、サーバー一覧・作成・起動・停止・ログ・設定・言語・診断を選べます。矢印キーで項目を選択し、Enterで決定します。スクリプトや自動化では従来どおり各サブコマンドを直接利用できます。
-
-### Language / 言語
-
-The default language is English. Save a persistent language preference with:
-
-初期言語は英語です。日本語へ永続的に変更する場合：
-
-```bash
-mcserver-kit lang --ja
-mcserver-kit lang --en
-```
-
-You can also override the language for one command only.
-
-コマンド1回だけ言語を上書きすることもできます。
-
-```bash
-mcserver-kit --lang en --help
-mcserver-kit --lang ja setup
-```
-
-Translations are stored in`locales/*.json`. To add a language, copy`locales/en.json`, translate the values without changing the keys, and submit a pull request.
-
-翻訳は`locales/*.json`にあります。言語を追加する場合は`locales/en.json`を複製し、キーを変えずに値を翻訳してPRを作成してください。
-
-```bash
-python3 scripts/validate-locales.py
-```
-
-CI verifies JSON syntax, empty translations, and key parity with the English catalog.
-
-保存先は次のとおりです。
-
-- 本体: `~/.local/share/mcserver-compose-kit`
-- 設定とMCIDテンプレート: `~/.config/mcserver-compose-kit`
-- 起動コマンド: `~/.local/bin/mcserver-kit`
-
-同じインストールコマンドを再実行すると、本体だけを更新して設定を保持します。設定をやり直す場合：
-
-```bash
-mcserver-kit setup
-```
-
-アンインストール時は通常、設定を残します。
-
-```bash
-mcserver-kit uninstall
-```
-
-設定とMCIDテンプレートも含めて削除する場合：
-
-```bash
-mcserver-kit uninstall --purge
-```
-
-## Windows入力ダイアログ
-
-WSLからWindows PowerShellを呼び、ExplorerによるZIP／フォルダ選択と、Windows IMEを使えるMOTD入力画面を表示します。追加のWindowsアプリは不要です。
-
-Windowsダイアログを利用できない場合やキャンセルした場合は、従来のターミナル入力へ戻ります。無効にする場合は`config.yml`へ次を設定します。
-
-```yaml
-ui:
-  windows_dialogs: false
-```
-
-## 主な機能
-
-- フォルダまたはZIP形式の配布ワールドを取り込み
-- Minecraftバージョンに合わせたJavaイメージの自動選択
-- 数字だけでも指定できるJavaメモリ設定
-- MCIDテンプレートをホワイトリストとOPの両方で再利用
-- オーナーMCIDを`${OWNER}`としてテンプレートへ展開
-- リソースパックURL、SHA-1、任意のUUIDを設定
-- Playitエージェントを同じComposeへ追加
-- 秘密情報を`config.yml`へ分離
-- 既存フォルダを上書きしない
-
-## 必要な環境
-
-- WSL2上のLinux
-- Docker DesktopのWSL Integration
+- Windows with WSL2
+- Docker Desktop with WSL Integration enabled for your distribution
 - Docker Compose v2
 - Bash
-- ZIPを直接取り込む場合のみ`unzip`
 
-確認：
+The installer checks for `python3`, `unzip`, and `whiptail`. On Ubuntu, it can install missing packages with `apt` after asking for confirmation.
+
+Check Docker from your WSL terminal before installing:
 
 ```bash
 docker version
 docker compose version
 ```
 
-## セットアップ
+## Install
 
-リポジトリを取得し、スクリプトへ実行権限を付けます。
-
-```bash
-git clone <repository-url> mcserver-tool-kit
-cd mcserver-tool-kit
-chmod +x new-minecraft-server.sh
-```
-
-公開用の設定例を、実設定へコピーします。
+Install the latest release:
 
 ```bash
-cp config.example.yml config.yml
-chmod 600 config.yml
+curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | bash
 ```
 
-`config.yml`はGit管理から除外されています。
-
-## config.yml
-
-```yaml
-owner:
-  minecraft_id: "c0tt0n_rain"
-
-minecraft:
-  # https://aka.ms/MinecraftEULA を確認し、同意する場合だけtrue
-  accept_eula: true
-
-paths:
-  server_root: "${HOME}/minecraftServer"
-
-defaults:
-  minecraft_version: "26.2"
-  java_memory: "8G"
-  timezone: "Asia/Tokyo"
-  max_players: 8
-  online_mode: true
-  enable_command_block: true
-  allow_flight: true
-  spawn_protection: 0
-  host_port: 25565
-
-access:
-  whitelist_enabled: true
-  whitelist_template: "default"
-  ops_enabled: true
-  ops_template: "owner"
-
-playit:
-  enabled: true
-  secret_key: "ここにPlayitのSECRET_KEY"
-  image: "ghcr.io/playit-cloud/playit-agent:0.17"
-
-docker:
-  java_image_tag: "auto"
-
-resource_pack:
-  enforce: true
-```
-
-### 秘密情報
-
-`playit.secret_key`を含む`config.yml`は、GitHubへコミットしないでください。公開するのは空欄の`config.example.yml`だけです。
-
-誤操作を防ぐため、次を確認できます。
+Install a specific release:
 
 ```bash
-git check-ignore -v config.yml
-git status --short
+curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | \
+  bash -s -- --version v1.0.0
 ```
 
-## MCIDテンプレート
+The installer downloads the release archive, verifies its SHA-256 checksum, and installs the program under `~/.local/share/mcserver-compose-kit`. It also adds a managed PATH block for `~/.local/bin` to `~/.bashrc`.
 
-ホワイトリストとOPは、同じ`mcid-templates`ディレクトリを参照します。
+The current shell is not reloaded automatically. Open a new terminal, or run the `source` command printed by the installer.
 
-```text
-mcid-templates/
-├─ owner.txt
-├─ Group1.txt
-└─ Group2.txt
+Re-running the installer updates the program files. It does not overwrite an existing configuration or MCID templates.
+
+## First setup
+
+The default language is English. To use Japanese, set it before setup:
+
+```bash
+mcserver-kit lang --ja
 ```
 
-1行に1つMCIDを書きます。空行と`#`以降は無視されます。
+Then run:
 
-```text
-# config.ymlのオーナー
-${OWNER}
-
-# 固定メンバー
-ExamplePlayer
-AnotherPlayer
+```bash
+mcserver-kit setup
 ```
 
-`owner.txt`をOP用に、`Group1.txt`をホワイトリスト用に使う、といった設定ができます。
+Setup asks for:
 
-## 使用方法
+- Owner Minecraft ID
+- Minecraft EULA acceptance
+- Whitelist and operator defaults
+- Additional MCIDs
+- Playit settings
+- Fallback Minecraft version and Java memory
+- Whether to start a server after creation by default
+- Whether to use Windows dialogs
+- Server destination directory
+
+The EULA must be accepted and setup must finish before a server can be created.
+
+## Open the dashboard
+
+```bash
+mcserver-kit
+```
+
+The dashboard includes server creation and management, global settings, MCID templates, language selection, diagnostics, and help. Use the arrow keys to select an item and Enter to open it.
+
+Running `mcserver-kit` without arguments in a non-interactive environment prints help instead of opening the dashboard.
+
+## Create a server
+
+Choose **Create server** from the dashboard, or run:
 
 ```bash
 mcserver-kit create
 ```
 
-入力する内容：
+You can select a world folder or ZIP archive. If an archive contains an extra top-level folder, the toolkit searches below it for the directory containing `level.dat`.
 
-1. サーバーID
-2. 表示名／MOTD
-3. Minecraftバージョン
-4. Javaメモリ
-5. 配布ワールドのルートフォルダまたはZIP
-6. ホワイトリストの有無とMCIDテンプレート
-7. OP自動付与の有無とMCIDテンプレート
-8. リソースパック配信情報
-9. Playitを使うか
+The version stored in `level.dat` becomes the default at the version prompt. If it cannot be detected, the configured fallback version is used. You can always type a different value.
 
-作成先は、既定で次の場所です。
-
-```text
-~/minecraftServer/<server-id>
-```
-
-## 配布ワールドの指定
-
-指定するのは、直下に`level.dat`があるワールドのルートフォルダです。
-
-```text
-Picking Over It/
-├─ level.dat
-├─ dimensions/
-├─ datapacks/
-├─ data/
-└─ config/
-```
-
-サーバーの保存先になる`data`ディレクトリそのものを指定するわけではありません。上記フォルダ全体が、生成先の`data/world`へコピーされます。
-
-Windowsのダウンロードフォルダは、WSLから次のように指定できます。
-
-```text
-/mnt/c/Users/<Windowsユーザー名>/Downloads/<配布フォルダ>/<ワールド名>
-```
-
-## 入力書式
-
-### Minecraftバージョン
-
-ワールドのフォルダまたはZIPを選ぶと、`level.dat`に保存されたMinecraftバージョンを検出し、入力時のデフォルト値にします。Enterを押せば検出結果を採用できます。
-
-検出できなかった場合は、`config.yml`の`defaults.minecraft_version`を候補にします。配布ページで別のバージョンが指定されている場合は、そちらを手動入力してください。
+Examples of accepted versions:
 
 ```text
 26.2
+1.21
 1.21.2
 LATEST
 ```
 
-`docker.java_image_tag: "auto"`の場合、現在は次のようにJavaイメージを選びます。
+With `docker.java_image_tag: "auto"`, the Java image is selected as follows:
 
-| Minecraft | Dockerイメージタグ |
-|---|---|
-| `26.x` / `LATEST` | `java25` |
-| `1.21` / `1.21.x` / `1.20.5`以降 | `java21` |
-| `1.18`～`1.20` / `1.18.x`～`1.20.4` | `java17` |
+| Minecraft version | Image tag |
+| --- | --- |
+| `26.x` or `LATEST` | `java25` |
+| `1.20.5` and later 1.x releases | `java21` |
+| `1.18` through `1.20.4` | `java17` |
 
-それより古いバージョンは自動判定せず停止します。必要なJavaタグを`config.yml`へ明示してください。
+Older releases require an explicit Docker image tag in the configuration.
 
-### Javaメモリ
+Java memory accepts values such as `8`, `8G`, and `8192M`. A number without a unit is treated as GiB.
 
-```text
-8       → 8G
-8G      → 8G
-8192M   → 8192M
-```
-
-### 表示名／MOTD
-
-Minecraftのマルチプレイ一覧で、サーバーアドレスの下に表示される説明文です。ワールド名やフォルダ名には影響しません。
-
-### リソースパック
-
-サーバーから配信する場合、次が必要です。
-
-- HTTPSの直接ダウンロードURL
-- ZIPのSHA-1
-- 任意のResource Pack ID（UUID）
-
-MCPacksなどのMinecraft向け配信サービスを利用できます。
-
-## 生成物
+By default, servers are created in:
 
 ```text
 ~/minecraftServer/<server-id>/
-├─ compose.yaml
-├─ .env
-├─ server.env
-├─ README.txt
-└─ data/
-   └─ world/
+├── compose.yaml
+├── .env
+├── server.env
+├── README.txt
+└── data/
+    └── world/
 ```
 
-- `compose.yaml`：Dockerの起動設定
-- `.env`：そのサーバー用設定とPlayit秘密鍵。権限`600`
-- `server.env`：TUIで管理するMinecraft設定の正本。権限`600`
-- `README.txt`：起動・停止手順
-- `data/`：ワールド、プレイヤー情報、進行状況
+The creation process shows its current step. Before starting a server it validates the generated Compose configuration with `docker compose config --quiet`.
 
-## サーバー管理
+## Manage servers
 
-管理対象サーバーと起動状態を一覧表示します。
+List managed servers:
 
 ```bash
 mcserver-kit list
 ```
 
-サーバーIDを指定して、作業ディレクトリへ手動で移動せずに操作できます。
+Use the dashboard, or run a command directly:
 
 ```bash
 mcserver-kit server <server-id> start
@@ -359,89 +159,122 @@ mcserver-kit server <server-id> status
 mcserver-kit server <server-id> logs
 mcserver-kit server <server-id> logs --no-follow
 mcserver-kit server <server-id> down
+mcserver-kit server <server-id> properties
 ```
 
-`start`は`docker compose config --quiet`で構成を検証してから`up -d`を実行します。`stop`と`shutdown`はコンテナを保持したまま停止し、`down`はコンテナとネットワークを削除します。いずれも`data/`のワールドデータは削除しません。
+`stop` and `shutdown` stop the container without removing it. `down` removes the container and network. These commands do not delete the server's `data/` directory.
 
-サーバーのMinecraft設定はTUIから一元管理できます。稼働中でも編集でき、保存後に今すぐ再作成・再起動して反映するか確認します。
+## Edit Minecraft settings
+
+Open **Server settings** from the dashboard, or run:
 
 ```bash
 mcserver-kit server <server-id> properties
 ```
 
-対象はMOTD、難易度、ゲームモード、最大人数、オンラインモード、ホワイトリスト・OP、飛行、コマンドブロック、PvP、描画・シミュレーション距離、スポーン保護、ネザーやMob/NPC生成、リソースパックなどです。
+The editor covers MOTD, difficulty, game mode, player limit, online mode, whitelist, operators, flight, command blocks, PvP, view and simulation distance, spawn protection, Nether and entity spawning, and resource packs.
 
-設定の正本は各サーバーの`server.env`です。Composeがこれをitzg/minecraft-serverへ渡し、起動時に`data/server.properties`へ反映します。TUIは`.env`と`server.properties`の両方へ同じ値を書かないため、設定の同期ずれを避けられます。
+`server.env` is the source of truth for settings managed by the toolkit. Docker Compose passes these values to `itzg/minecraft-server`, which applies them to `server.properties` when the container starts.
 
-従来形式の生成済みサーバーは、初回にproperties画面を開いたときに移行するか確認します。同意すると元のComposeを`compose.yaml.mcserver-kit.bak`へ保存し、現在の`.env`、Compose環境変数、`server.properties`から`server.env`へ移行します。キャンセルした場合は変更しません。
+When an older server is opened for the first time, the editor asks before migrating it. The original Compose file is saved as `compose.yaml.mcserver-kit.bak`.
 
-## 作成後
+## MCID templates
 
-作成中は、ワールドのコピー、設定生成、Compose検証などの現在の処理を段階表示します。
+Templates are plain text files stored in:
 
-最後に、Docker Composeでそのまま起動するか確認します。起動を選んだ場合は、次の処理まで自動で行います。
-
-```bash
-docker compose config --quiet
-docker compose up -d
-docker compose ps
+```text
+~/.config/mcserver-compose-kit/mcid-templates/
 ```
 
-初回起動ではDockerイメージの取得に時間がかかることがあります。開始前にその旨を表示し、Docker Composeの進捗をそのまま表示します。
+Write one Minecraft ID per line. Blank lines and text after `#` are ignored. `${OWNER}` expands to the Owner ID from the main configuration.
 
-手動で起動する場合：
-
-構成確認：
-
-```bash
-cd ~/minecraftServer/<server-id>
-docker compose config --quiet
+```text
+${OWNER}
+ExamplePlayer
+AnotherPlayer
 ```
 
-起動：
+Manage templates from the dashboard or run:
 
 ```bash
-docker compose up -d
-docker compose logs -f minecraft
+mcserver-kit templates
 ```
 
-停止：
+## Windows dialogs
+
+When enabled, the toolkit calls Windows PowerShell from WSL to open Explorer-based folder and ZIP selection dialogs. MOTD text can also be entered in a Windows dialog, avoiding common terminal IME editing problems.
+
+If the Windows dialog is unavailable or cancelled, input falls back to the terminal. Disable it in the global settings screen or set:
+
+```yaml
+ui:
+  windows_dialogs: false
+```
+
+## Configuration and secrets
+
+User configuration is stored at:
+
+```text
+~/.config/mcserver-compose-kit/config.yml
+```
+
+Use `mcserver-kit config` for common settings. The file can also be edited directly.
+
+The configuration may contain a Playit secret key. Do not commit it. Generated server `.env` and `server.env` files may also contain private values.
+
+## Language
+
+Set a persistent language:
 
 ```bash
-docker compose down
+mcserver-kit lang --en
+mcserver-kit lang --ja
 ```
 
-## 注意事項
-
-- サーバーは自動起動しません。
-- 作成先が既に存在する場合は上書きせず停止します。
-- 同じホストポートを使うサーバーは同時起動できません。
-- 同じPlayitエージェント秘密鍵を使うサーバーも同時起動しないでください。
-- MODローダー必須の配布マップは、現在のVANILLA用テンプレートの対象外です。
-- `data/`を削除するとワールドと進行状況を失います。
-
-## GitHub公開前の確認
+Override the language for one command:
 
 ```bash
-bash -n new-minecraft-server.sh
-bash tests/run-tests.sh
-git check-ignore -v config.yml
-git status --short
+mcserver-kit --lang ja --help
 ```
 
-`config.yml`や`.env`がステージ対象に含まれていないことを確認してください。
+See [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-language) to add or update a translation.
 
-## テスト
+## Reset, update, and uninstall
 
-仕様テストは、Javaイメージの選択、`level.dat`からの保存バージョン検出、メモリとWindowsパスの正規化、入れ子になったワールドの検出、ZIPからのワールド取り込みを確認します。
+Delete configuration and MCID templates while keeping installed program files and created servers:
 
 ```bash
-bash tests/run-tests.sh
+mcserver-kit reset
 ```
 
-ZIPのテストには`zip`と`unzip`が必要です。`zip`がないローカル環境ではZIPテストだけをスキップします。GitHub Actionsでは必要なコマンドを導入し、次を自動実行します。
+Update by running the installer again. Existing user configuration is kept.
 
-- Bash構文チェック
-- Python構文チェック
-- ShellCheck
-- 仕様テスト
+Remove the program but keep user configuration:
+
+```bash
+mcserver-kit uninstall
+```
+
+Remove the program and user configuration:
+
+```bash
+mcserver-kit uninstall --purge
+```
+
+After uninstalling, open a new terminal. In the current Bash session, `hash -r` clears a cached command path if needed.
+
+## Limitations
+
+- Servers that use the same host port cannot run at the same time.
+- Do not run multiple Playit agents with the same secret key at the same time.
+- Mod-loader-specific maps are not currently configured by the vanilla template.
+- Deleting a server's `data/` directory deletes its world and progress.
+
+## Contributing
+
+Bug reports, documentation fixes, and translations are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+
+## License
+
+See [LICENSE](LICENSE).
