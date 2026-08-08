@@ -67,6 +67,7 @@ read_mcid_list() {
 
   printf '%s\n' "$message" >&2
   tr input.one_per_line >&2
+  printf '\n' >&2
   while true; do
     read -r -p "$(tr input.mcid): " line
     [[ -n "$line" ]] || break
@@ -103,6 +104,7 @@ main() {
   done
 
   tr setup.eula_url
+  printf '\n'
   accept_eula="$(prompt_bool "$(tr setup.eula_accept)" false)"
   whitelist_enabled="$(prompt_bool "$(tr setup.whitelist_enable)" true)"
   if [[ "$whitelist_enabled" == 'true' ]]; then
@@ -141,6 +143,9 @@ main() {
   } >"${TEMPLATE_DIR}/default.txt"
 
   cat >"$CONFIG_FILE" <<CONFIG
+setup:
+  completed: true
+
 owner:
   minecraft_id: $(yaml_quote "$owner_mcid")
 
@@ -192,6 +197,7 @@ CONFIG
   if [[ "$accept_eula" != 'true' ]]; then
     tr setup.eula_not_accepted
   fi
+  printf '\n'
 }
 
 main "$@"

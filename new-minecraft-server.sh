@@ -431,6 +431,10 @@ main() {
 [[ -d "$MCID_TEMPLATE_DIR" ]] ||
   die "MCIDテンプレートディレクトリがありません: ${MCID_TEMPLATE_DIR}"
 
+setup_completed="$(yaml_get 'setup.completed' 'false')"
+is_true "$setup_completed" ||
+  die "初回設定が完了していません。先に mcserver-kit setup を実行してください"
+
 owner_mcid="$(yaml_get 'owner.minecraft_id')"
 validate_mcid "$owner_mcid" ||
   die "config.ymlのowner.minecraft_idを設定してください"
@@ -574,18 +578,46 @@ log_step '3/5' '.envとCompose設定を生成しています。'
   printf 'SERVER_ID=%s\n' "$(escape_env_value "$server_id")"
   printf 'MC_VERSION=%s\n' "$(escape_env_value "$version")"
   printf 'MC_MEMORY=%s\n' "$(escape_env_value "$memory")"
-  printf 'MC_MOTD=%s\n' "$(escape_env_value "$server_name")"
-  if is_true "$whitelist_enabled"; then
-    printf 'MC_WHITELIST=%s\n' "$(escape_env_value "$whitelist_ids")"
-  fi
-  if is_true "$ops_enabled"; then
-    printf 'MC_OPS=%s\n' "$(escape_env_value "$ops_ids")"
-  fi
   if is_true "$playit_enabled"; then
     printf 'PLAYIT_SECRET_KEY=%s\n' "$(escape_env_value "$playit_secret_key")"
   fi
 } >"${target}/.env"
 chmod 600 "${target}/.env"
+
+{
+  printf 'MOTD=%s\n' "$(escape_env_value "$server_name")"
+  printf 'DIFFICULTY="easy"\n'
+  printf 'MODE="survival"\n'
+  printf 'FORCE_GAMEMODE="false"\n'
+  printf 'HARDCORE="false"\n'
+  printf 'PVP="true"\n'
+  printf 'MAX_PLAYERS=%s\n' "$(escape_env_value "$max_players")"
+  printf 'ONLINE_MODE=%s\n' "$(escape_env_value "$online_mode")"
+  printf 'ALLOW_FLIGHT=%s\n' "$(escape_env_value "$allow_flight")"
+  printf 'ENABLE_COMMAND_BLOCK=%s\n' "$(escape_env_value "$enable_command_block")"
+  printf 'SPAWN_PROTECTION=%s\n' "$(escape_env_value "$spawn_protection")"
+  printf 'VIEW_DISTANCE="10"\n'
+  printf 'SIMULATION_DISTANCE="10"\n'
+  printf 'PLAYER_IDLE_TIMEOUT="0"\n'
+  printf 'ALLOW_NETHER="true"\n'
+  printf 'SPAWN_ANIMALS="true"\n'
+  printf 'SPAWN_MONSTERS="true"\n'
+  printf 'SPAWN_NPCS="true"\n'
+  printf 'ENABLE_STATUS="true"\n'
+  printf 'HIDE_ONLINE_PLAYERS="false"\n'
+  printf 'MAX_TICK_TIME="60000"\n'
+  printf 'ENABLE_WHITELIST=%s\n' "$(escape_env_value "$whitelist_enabled")"
+  printf 'ENFORCE_WHITELIST="true"\n'
+  printf 'WHITELIST=%s\n' "$(escape_env_value "$whitelist_ids")"
+  printf 'EXISTING_WHITELIST_FILE="SYNC_FILE_MERGE_LIST"\n'
+  printf 'OPS=%s\n' "$(escape_env_value "$ops_ids")"
+  printf 'EXISTING_OPS_FILE="SYNC_FILE_MERGE_LIST"\n'
+  printf 'RESOURCE_PACK=%s\n' "$(escape_env_value "$resource_pack_url")"
+  printf 'RESOURCE_PACK_SHA1=%s\n' "$(escape_env_value "$resource_pack_sha1")"
+  printf 'RESOURCE_PACK_ID=%s\n' "$(escape_env_value "$resource_pack_id")"
+  printf 'RESOURCE_PACK_ENFORCE=%s\n' "$(escape_env_value "$resource_pack_enforce")"
+} >"${target}/server.env"
+chmod 600 "${target}/server.env"
 
 cat >"${target}/compose.yaml" <<COMPOSE
 services:
@@ -595,6 +627,8 @@ services:
     restart: unless-stopped
     tty: true
     stdin_open: true
+    env_file:
+      - server.env
 
     ports:
       - "127.0.0.1:${host_port}:25565"
@@ -607,44 +641,9 @@ services:
       TZ: "${timezone}"
 
       LEVEL: "world"
-      ONLINE_MODE: "${online_mode^^}"
 COMPOSE
-
-if is_true "$whitelist_enabled"; then
-  cat >>"${target}/compose.yaml" <<'COMPOSE'
-      WHITELIST: "${MC_WHITELIST}"
-      ENFORCE_WHITELIST: "TRUE"
-COMPOSE
-else
-  cat >>"${target}/compose.yaml" <<'COMPOSE'
-      ENABLE_WHITELIST: "FALSE"
-COMPOSE
-fi
-
-if is_true "$ops_enabled"; then
-  cat >>"${target}/compose.yaml" <<'COMPOSE'
-      OPS: "${MC_OPS}"
-COMPOSE
-fi
-
-if is_true "$resource_pack_enabled"; then
-  {
-    printf '      RESOURCE_PACK: %s\n' "$(escape_env_value "$resource_pack_url")"
-    printf '      RESOURCE_PACK_SHA1: %s\n' "$(escape_env_value "$resource_pack_sha1")"
-    printf '      RESOURCE_PACK_ENFORCE: "%s"\n' "${resource_pack_enforce^^}"
-    if [[ -n "$resource_pack_id" ]]; then
-      printf '      RESOURCE_PACK_ID: %s\n' "$(escape_env_value "$resource_pack_id")"
-    fi
-  } >>"${target}/compose.yaml"
-fi
 
 cat >>"${target}/compose.yaml" <<COMPOSE
-      ENABLE_COMMAND_BLOCK: "${enable_command_block^^}"
-      ALLOW_FLIGHT: "${allow_flight^^}"
-      SPAWN_PROTECTION: "${spawn_protection}"
-      MAX_PLAYERS: "${max_players}"
-      MOTD: "\${MC_MOTD}"
-
     volumes:
       - ./data:/data
 COMPOSE

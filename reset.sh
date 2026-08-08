@@ -6,6 +6,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${MCSERVER_KIT_CONFIG:-${HOME}/.config/mcserver-compose-kit/config.yml}"
 TEMPLATE_DIR="${MCSERVER_KIT_MCID_TEMPLATE_DIR:-${HOME}/.config/mcserver-compose-kit/mcid-templates}"
+LANGUAGE_FILE="${MCSERVER_KIT_LANGUAGE_FILE:-${HOME}/.config/mcserver-compose-kit/language}"
 
 # shellcheck source=scripts/i18n.sh
 source "${SCRIPT_DIR}/scripts/i18n.sh"
@@ -41,7 +42,7 @@ for protected_path in '' / "$HOME"; do
   fi
 done
 
-tr reset.summary "$CONFIG_FILE" "$TEMPLATE_DIR"
+tr reset.summary "$CONFIG_FILE" "$TEMPLATE_DIR" "$LANGUAGE_FILE"
 if [[ "$confirm" != 'true' ]]; then
   read -r -p "$(tr reset.confirm)" answer
   case "${answer,,}" in
@@ -54,5 +55,6 @@ if [[ "$confirm" != 'true' ]]; then
 fi
 
 rm -f -- "$CONFIG_FILE"
+rm -f -- "$LANGUAGE_FILE"
 rm -rf -- "$TEMPLATE_DIR"
 tr reset.done

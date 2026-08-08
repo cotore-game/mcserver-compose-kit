@@ -12,9 +12,21 @@ Docker Desktop、WSL2、Docker DesktopのWSL Integrationが設定済みである
 curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | bash
 ```
 
-インストーラーは最新のGitHub Releaseを取得してSHA-256を検証します。不足している`python3`や`unzip`は、確認後に`sudo apt`で導入できます。インストール後は次で起動します。
+バージョンを固定する場合は、`bash -s --`以降へ指定します。
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | \
+  bash -s -- --version v0.2.0
+```
+
+`MCSERVER_KIT_VERSION=v0.2.0`環境変数でも指定できます。省略時は最新Releaseを使用します。
+
+インストーラーは最新のGitHub Releaseを取得してSHA-256を検証します。不足している`python3`や`unzip`は、確認後に`sudo apt`で導入できます。インストール後は次で起動します。
+
+インストーラーは`~/.bashrc`へ管理済みのPATH設定を追加します。現在開いているターミナルには自動反映しないため、表示された`source ~/.bashrc`を実行するか、ターミナルを開き直してください。インストール直後にsetupは自動起動しません。
+
+```bash
+mcserver-kit setup
 mcserver-kit
 ```
 
@@ -30,9 +42,18 @@ mcserver-kit --help
 
 ### Language / 言語
 
-By default, the language is selected from`LANG`（`ja*`は日本語、それ以外は英語）. You can override it for a command:
+The default language is English. Save a persistent language preference with:
 
-デフォルトでは`LANG`から言語を選択します（`ja*`は日本語、それ以外は英語）。コマンド単位でも指定できます。
+初期言語は英語です。日本語へ永続的に変更する場合：
+
+```bash
+mcserver-kit lang --ja
+mcserver-kit lang --en
+```
+
+You can also override the language for one command only.
+
+コマンド1回だけ言語を上書きすることもできます。
 
 ```bash
 mcserver-kit --lang en --help
@@ -210,7 +231,7 @@ AnotherPlayer
 ## 使用方法
 
 ```bash
-./new-minecraft-server.sh
+mcserver-kit create
 ```
 
 入力する内容：
@@ -304,6 +325,7 @@ MCPacksなどのMinecraft向け配信サービスを利用できます。
 ~/minecraftServer/<server-id>/
 ├─ compose.yaml
 ├─ .env
+├─ server.env
 ├─ README.txt
 └─ data/
    └─ world/
@@ -311,8 +333,44 @@ MCPacksなどのMinecraft向け配信サービスを利用できます。
 
 - `compose.yaml`：Dockerの起動設定
 - `.env`：そのサーバー用設定とPlayit秘密鍵。権限`600`
+- `server.env`：TUIで管理するMinecraft設定の正本。権限`600`
 - `README.txt`：起動・停止手順
 - `data/`：ワールド、プレイヤー情報、進行状況
+
+## サーバー管理
+
+管理対象サーバーと起動状態を一覧表示します。
+
+```bash
+mcserver-kit list
+```
+
+サーバーIDを指定して、作業ディレクトリへ手動で移動せずに操作できます。
+
+```bash
+mcserver-kit server <server-id> start
+mcserver-kit server <server-id> stop
+mcserver-kit server <server-id> shutdown
+mcserver-kit server <server-id> restart
+mcserver-kit server <server-id> status
+mcserver-kit server <server-id> logs
+mcserver-kit server <server-id> logs --no-follow
+mcserver-kit server <server-id> down
+```
+
+`start`は`docker compose config --quiet`で構成を検証してから`up -d`を実行します。`stop`と`shutdown`はコンテナを保持したまま停止し、`down`はコンテナとネットワークを削除します。いずれも`data/`のワールドデータは削除しません。
+
+サーバーのMinecraft設定はTUIから一元管理できます。稼働中でも編集でき、保存後に今すぐ再作成・再起動して反映するか確認します。
+
+```bash
+mcserver-kit server <server-id> properties
+```
+
+対象はMOTD、難易度、ゲームモード、最大人数、オンラインモード、ホワイトリスト・OP、飛行、コマンドブロック、PvP、描画・シミュレーション距離、スポーン保護、ネザーやMob/NPC生成、リソースパックなどです。
+
+設定の正本は各サーバーの`server.env`です。Composeがこれをitzg/minecraft-serverへ渡し、起動時に`data/server.properties`へ反映します。TUIは`.env`と`server.properties`の両方へ同じ値を書かないため、設定の同期ずれを避けられます。
+
+従来形式の生成済みサーバーは、初回にproperties画面を開いたときに移行するか確認します。同意すると元のComposeを`compose.yaml.mcserver-kit.bak`へ保存し、現在の`.env`、Compose環境変数、`server.properties`から`server.env`へ移行します。キャンセルした場合は変更しません。
 
 ## 作成後
 

@@ -6,16 +6,22 @@ declare -A I18N_MESSAGES=()
 
 detect_language() {
   local requested="${MCSERVER_KIT_LANG:-}"
+  local language_file="${MCSERVER_KIT_LANGUAGE_FILE:-${HOME}/.config/mcserver-compose-kit/language}"
 
   if [[ -n "$requested" ]]; then
     printf '%s' "${requested%%[_-]*}"
     return
   fi
 
-  case "${LANG:-}" in
-    ja* | JA*) printf 'ja' ;;
-    *) printf 'en' ;;
-  esac
+  if [[ -f "$language_file" ]]; then
+    requested="$(head -n 1 "$language_file")"
+    if [[ "$requested" =~ ^[A-Za-z][A-Za-z0-9_-]*$ ]]; then
+      printf '%s' "${requested%%[_-]*}"
+      return
+    fi
+  fi
+
+  printf 'en'
 }
 
 load_messages() {

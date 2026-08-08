@@ -8,6 +8,29 @@ CONFIG_FILE="${MCSERVER_KIT_CONFIG:-${HOME}/.config/mcserver-compose-kit/config.
 TEMPLATE_DIR="${MCSERVER_KIT_MCID_TEMPLATE_DIR:-${HOME}/.config/mcserver-compose-kit/mcid-templates}"
 CONFIG_VALUE="${SCRIPT_DIR}/scripts/config-value.py"
 
+# Keep whiptail readable on terminals whose default newt theme uses a bright
+# magenta selection. Users can override this with MCSERVER_KIT_TUI_COLORS or
+# an existing NEWT_COLORS value.
+if [[ -z "${NEWT_COLORS:-}" ]]; then
+  export NEWT_COLORS="${MCSERVER_KIT_TUI_COLORS:-
+root=white,black
+window=white,black
+border=lightgray,black
+title=lightcyan,black
+textbox=white,black
+listbox=white,black
+actlistbox=white,blue
+actsellistbox=white,blue
+button=black,lightgray
+actbutton=white,blue
+compactbutton=white,black
+entry=white,black
+label=white,black
+checkbox=white,black
+actcheckbox=white,blue
+}"
+fi
+
 # shellcheck source=scripts/i18n.sh
 source "${SCRIPT_DIR}/scripts/i18n.sh"
 load_messages
