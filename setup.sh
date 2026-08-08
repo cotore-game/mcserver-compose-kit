@@ -197,6 +197,7 @@ CONFIG
   if [[ "$accept_eula" != 'true' ]]; then
     tr setup.eula_not_accepted
   fi
+  printf '\n'
 }
 
 main "$@"
