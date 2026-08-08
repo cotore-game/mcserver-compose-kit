@@ -26,7 +26,9 @@ show_help() {
   tr cli.usage
   printf '\n'
   cat <<HELP
-  mcserver-kit [create]
+  mcserver-kit
+  mcserver-kit home
+  mcserver-kit create
   mcserver-kit setup
   mcserver-kit config
   mcserver-kit templates
@@ -41,6 +43,7 @@ HELP
   printf '\n'
   tr cli.commands
   printf '\n'
+  printf '  %-20s %s\n' home "$(tr cli.home)"
   printf '  %-20s %s\n' create "$(tr cli.create)"
   printf '  %-20s %s\n' setup "$(tr cli.setup)"
   printf '  %-20s %s\n' config "$(tr cli.config)"
@@ -61,8 +64,20 @@ HELP
 HELP
 }
 
-command_name="${1-create}"
+if [[ $# -eq 0 ]]; then
+  if [[ -t 0 && -t 1 ]]; then
+    exec "${SCRIPT_DIR}/home-tui.sh"
+  fi
+  show_help
+  exit 0
+fi
+
+command_name="$1"
 case "$command_name" in
+  home)
+    shift
+    exec "${SCRIPT_DIR}/home-tui.sh" "$@"
+    ;;
   create)
     shift || true
     exec "${SCRIPT_DIR}/new-minecraft-server.sh" "$@"

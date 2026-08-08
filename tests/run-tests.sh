@@ -303,6 +303,7 @@ test_local_installation() {
   assert_equal 'present' "$([[ -x "${install_dir}/lang.sh" ]] && printf present)" 'the installer includes the language command'
   assert_equal 'present' "$([[ -x "${install_dir}/server-manager.sh" ]] && printf present)" 'the installer includes the server manager'
   assert_equal 'present' "$([[ -x "${install_dir}/server-properties-tui.sh" ]] && printf present)" 'the installer includes the properties TUI'
+  assert_equal 'present' "$([[ -x "${install_dir}/home-tui.sh" ]] && printf present)" 'the installer includes the home dashboard'
   assert_equal 'present' "$([[ -x "${install_dir}/scripts/server-config.py" ]] && printf present)" 'the installer includes the unified server settings editor'
   assert_equal 'en' "$(cat "${config_dir}/language")" 'the installer defaults to English'
   assert_equal '1' "$(grep -Fxc '# >>> mcserver-kit PATH >>>' "$shell_rc")" 'the installer registers one managed PATH block'
@@ -325,6 +326,35 @@ test_local_installation() {
   assert_equal 'absent' "$([[ ! -d "$install_dir" ]] && printf absent)" 'the uninstaller removes installed program files'
   assert_equal 'present' "$([[ -f "${config_dir}/config.yml" ]] && printf present)" 'the uninstaller preserves config by default'
   assert_equal 'absent' "$(! grep -q 'mcserver-kit PATH' "$shell_rc" && printf absent)" 'the uninstaller removes its managed PATH block'
+}
+
+test_home_dashboard() {
+  local temp_dir="$1"
+  local config_file="${temp_dir}/home/config.yml"
+  local fake_bin="${temp_dir}/home/bin"
+  local whiptail_log="${temp_dir}/home/whiptail.log"
+  local output
+
+  mkdir -p "$fake_bin"
+  cat >"$config_file" <<CONFIG
+paths:
+  server_root: "${temp_dir}/home/servers"
+CONFIG
+  cat >"${fake_bin}/whiptail" <<'WHIPTAIL'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$MCSERVER_KIT_TEST_WHIPTAIL_LOG"
+printf 'exit' >&2
+WHIPTAIL
+  chmod +x "${fake_bin}/whiptail"
+
+  output="$(MCSERVER_KIT_LANG=en bash "${REPO_ROOT}/mcserver-kit")"
+  assert_equal 'present' "$(grep -q 'mcserver-kit home' <<<"$output" && printf present)" 'non-interactive no-argument use shows help instead of starting creation'
+
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_TUI_TEST=true MCSERVER_KIT_TEST_WHIPTAIL_LOG="$whiptail_log" \
+    bash "${REPO_ROOT}/mcserver-kit" home
+  assert_equal 'present' "$(grep -q -- '--backtitle mcserver-kit' "$whiptail_log" && printf present)" 'the home command opens the interactive dashboard'
+  assert_equal 'present' "$(grep -q 'servers Servers' "$whiptail_log" && printf present)" 'the dashboard exposes server management'
 }
 
 test_setup_command() {
@@ -546,6 +576,7 @@ main() {
   test_config_value_editor "$TEST_TEMP_DIR"
   test_server_management "$TEST_TEMP_DIR"
   test_server_property_editor "$TEST_TEMP_DIR"
+  test_home_dashboard "$TEST_TEMP_DIR"
 
   printf 'PASS: %d specification tests, %d skipped\n' "$tests_run" "$tests_skipped"
 }
