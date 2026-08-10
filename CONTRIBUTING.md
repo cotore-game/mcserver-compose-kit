@@ -147,7 +147,7 @@ Before opening a pull request:
 - Use a clear title, preferably with a Conventional Commits prefix such as `feat:`, `fix:`, `docs:`, or `test:`.
 - Summarize what changed and how it was tested.
 
-Pull requests targeting `main` are checked by GitHub Actions. The required `test` job must pass before merging.
+Pull requests targeting `develop` or `main` are checked by GitHub Actions. The required `test` job must pass before merging into `main`.
 
 ## Releases
 
