@@ -322,7 +322,7 @@ test_local_installation() {
   assert_equal 'present' "$([[ -x "${bin_dir}/mcserver-kit" ]] && printf present)" 'the installer creates the launcher'
   installed_help="$("${bin_dir}/mcserver-kit" --help)"
   assert_equal 'present' "$(grep -q 'mcserver-kit setup' <<<"$installed_help" && printf present)" 'the installed launcher exposes subcommand help'
-  assert_equal '1.1.0-dev' "$("${bin_dir}/mcserver-kit" --version | awk '{print $2}')" 'the installed launcher reports its version'
+  assert_equal '1.1.0' "$("${bin_dir}/mcserver-kit" --version | awk '{print $2}')" 'the installed launcher reports its version'
   assert_equal 'present' "$([[ -f "${config_dir}/config.yml" ]] && printf present)" 'the installer creates the initial config'
   assert_equal 'present' "$([[ -f "${install_dir}/libexec/mcserver-kit/windows-dialog.ps1" ]] && printf present)" 'the installer includes the Windows dialog helper'
   assert_equal 'present' "$([[ -x "${install_dir}/libexec/mcserver-kit/lang.sh" ]] && printf present)" 'the installer includes the language command'
@@ -335,7 +335,7 @@ test_local_installation() {
   assert_equal 'en' "$(cat "${config_dir}/language")" 'the installer defaults to English'
   assert_equal '1' "$(grep -Fxc '# >>> mcserver-kit PATH >>>' "$shell_rc")" 'the installer registers one managed PATH block'
   assert_equal 'present' "$(grep -q 'mcserver-kit setup' "$install_log" && printf present)" 'the installer instructs the user to run setup'
-  assert_equal 'present' "$(grep -q 'mcserver-kit 1.1.0-dev' "$install_log" && printf present)" 'the installer shows the installed version'
+  assert_equal 'present' "$(grep -q 'mcserver-kit 1.1.0' "$install_log" && printf present)" 'the installer shows the installed version'
   assert_equal 'absent' "$(! grep -q '初回セットアップを開始' "$install_log" && printf absent)" 'the installer does not start setup automatically'
 
   printf '\n# preserve-on-update\n' >>"${config_dir}/config.yml"
