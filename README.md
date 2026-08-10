@@ -91,6 +91,12 @@ mcserver-kit
 
 The dashboard includes server creation and management, global settings, MCID templates, language selection, diagnostics, and help. Use the arrow keys to select an item and Enter to open it.
 
+Check the installed toolkit version with:
+
+```bash
+mcserver-kit --version
+```
+
 Running `mcserver-kit` without arguments in a non-interactive environment prints help instead of opening the dashboard.
 
 ## Create a server
@@ -239,6 +245,8 @@ mcserver-kit --lang ja --help
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-language) to add or update a translation.
+
+English is the fallback catalog. If a selected language has not translated a newly added key yet, that message is shown in English instead of exposing the internal key name.
 
 ## Reset, update, and uninstall
 

@@ -46,6 +46,16 @@ bash install.sh
 
 This updates the installed program while preserving an existing user configuration and MCID templates.
 
+## Repository layout
+
+- `mcserver-kit` is the public command dispatcher.
+- `libexec/mcserver-kit/` contains commands and helpers called internally by the dispatcher.
+- `share/mcserver-kit/` contains locale catalogs, templates, and example configuration files.
+- `scripts/` contains repository maintenance tools that are not installed as runtime commands.
+- `tests/` contains the specification test suite.
+
+Keep new runtime code out of `scripts/`. Put executable behavior under `libexec/mcserver-kit/` and non-executable runtime data under `share/mcserver-kit/`.
+
 ## Tests
 
 Run the specification tests:
@@ -57,19 +67,15 @@ bash tests/run-tests.sh
 Run syntax and locale checks:
 
 ```bash
-bash -n mcserver-kit home-tui.sh new-minecraft-server.sh setup.sh reset.sh \
-  config-tui.sh server-manager.sh server-properties-tui.sh lang.sh \
-  install.sh uninstall.sh tests/run-tests.sh
-python3 -m py_compile scripts/*.py
-python3 scripts/validate-locales.py
+bash -n mcserver-kit install.sh libexec/mcserver-kit/*.sh tests/run-tests.sh
+python3 -m py_compile libexec/mcserver-kit/*.py scripts/validate-locales.py
+python3 scripts/validate-locales.py share/mcserver-kit/locales
 ```
 
 Run ShellCheck if it is installed:
 
 ```bash
-shellcheck -x mcserver-kit home-tui.sh new-minecraft-server.sh setup.sh \
-  reset.sh config-tui.sh server-manager.sh server-properties-tui.sh \
-  lang.sh install.sh uninstall.sh tests/run-tests.sh
+shellcheck -x mcserver-kit install.sh libexec/mcserver-kit/*.sh tests/run-tests.sh
 ```
 
 The ZIP import tests need both `zip` and `unzip`. They are skipped locally when `zip` is unavailable. GitHub Actions installs both packages and runs the complete suite.
@@ -78,8 +84,8 @@ The ZIP import tests need both `zip` and `unzip`. They are skipped locally when 
 
 English is the source catalog. When adding a message:
 
-1. Add the key and English value to `locales/en.json`.
-2. Add the same key to every other `locales/*.json` file.
+1. Add the key and English value to `share/mcserver-kit/locales/en.json`.
+2. Translate the key in other catalogs when possible. Missing translations fall back to English and do not block the feature pull request.
 3. Call it from shell code with `tr message.key`.
 4. Pass substitutions as additional arguments, for example `tr server.not_found "$server_id"`.
 5. Run the locale validator and specification tests.
@@ -90,12 +96,12 @@ Values are passed to Bash `printf`. Preserve placeholders such as `%s` and their
 
 ## Adding a language
 
-Locale files use a short language code as the filename. For example, a German catalog would be `locales/de.json`.
+Locale files use a short language code as the filename. For example, a German catalog would be `share/mcserver-kit/locales/de.json`.
 
 1. Copy the English catalog:
 
    ```bash
-   cp locales/en.json locales/de.json
+   cp share/mcserver-kit/locales/en.json share/mcserver-kit/locales/de.json
    ```
 
 2. Translate values only. Do not rename, add, or remove keys.
@@ -110,10 +116,10 @@ Locale files use a short language code as the filename. For example, a German ca
 4. Validate the catalog:
 
    ```bash
-   python3 scripts/validate-locales.py
+   python3 scripts/validate-locales.py share/mcserver-kit/locales
    ```
 
-   The validator checks JSON structure, empty values, missing keys, and extra keys against `locales/en.json`.
+   The validator checks JSON structure and empty values. Missing keys are reported as English fallbacks; keys that do not exist in the English catalog fail validation.
 
 5. Preview one command without changing the saved language:
 
@@ -121,13 +127,13 @@ Locale files use a short language code as the filename. For example, a German ca
    bash mcserver-kit --lang de --help
    ```
 
-6. Add the language to the interactive selector in `home-tui.sh`. The first value is the language code, the second is the label shown to users:
+6. Add the language to the interactive selector in `libexec/mcserver-kit/home-tui.sh`. The first value is the language code, the second is the label shown to users:
 
    ```bash
    de Deutsch OFF
    ```
 
-7. Add a persistent CLI option in `lang.sh` and update `lang.usage` in every catalog. The existing `--en` and `--ja` branches show the expected structure.
+7. Add a persistent CLI option in `libexec/mcserver-kit/lang.sh` and update `lang.usage` in every catalog. The existing `--en` and `--ja` branches show the expected structure.
 
 8. Add specification coverage for the new language selection and run the full test suite.
 
