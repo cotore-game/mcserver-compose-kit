@@ -1,4 +1,4 @@
-# これは生成例です。通常はnew-minecraft-server.shがサーバーごとに生成します。
+# これは生成例です。通常はmcserver-kit createがサーバーごとに生成します。
 services:
   minecraft:
     image: itzg/minecraft-server:java25

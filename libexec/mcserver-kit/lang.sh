@@ -7,8 +7,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LANGUAGE_FILE="${MCSERVER_KIT_LANGUAGE_FILE:-${HOME}/.config/mcserver-compose-kit/language}"
 language=''
 
-# shellcheck source=scripts/i18n.sh
-source "${SCRIPT_DIR}/scripts/i18n.sh"
+# shellcheck source=libexec/mcserver-kit/i18n.sh
+source "${SCRIPT_DIR}/i18n.sh"
 
 case "${1-}" in
   --ja | ja) language='ja' ;;

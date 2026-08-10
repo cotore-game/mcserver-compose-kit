@@ -4,6 +4,13 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+LIBEXEC_DIR="${MCSERVER_KIT_LIBEXEC_DIR:-${SCRIPT_DIR}/libexec/mcserver-kit}"
+SHARE_DIR="${MCSERVER_KIT_SHARE_DIR:-${SCRIPT_DIR}/share/mcserver-kit}"
+VERSION_FILE="${SCRIPT_DIR}/VERSION"
+MCSERVER_KIT_VERSION="$(head -n 1 "$VERSION_FILE" 2>/dev/null || printf unknown)"
+export MCSERVER_KIT_ROOT="$SCRIPT_DIR"
+export MCSERVER_KIT_LIBEXEC_DIR="$LIBEXEC_DIR"
+export MCSERVER_KIT_SHARE_DIR="$SHARE_DIR"
 export MCSERVER_KIT_CONFIG="${MCSERVER_KIT_CONFIG:-${HOME}/.config/mcserver-compose-kit/config.yml}"
 export MCSERVER_KIT_MCID_TEMPLATE_DIR="${MCSERVER_KIT_MCID_TEMPLATE_DIR:-${HOME}/.config/mcserver-compose-kit/mcid-templates}"
 export MCSERVER_KIT_LANGUAGE_FILE="${MCSERVER_KIT_LANGUAGE_FILE:-${HOME}/.config/mcserver-compose-kit/language}"
@@ -17,12 +24,12 @@ if [[ "${1-}" == '--lang' ]]; then
   shift 2
 fi
 
-# shellcheck source=scripts/i18n.sh
-source "${SCRIPT_DIR}/scripts/i18n.sh"
+# shellcheck source=libexec/mcserver-kit/i18n.sh
+source "${LIBEXEC_DIR}/i18n.sh"
 load_messages
 
 show_help() {
-  printf 'mcserver-kit - %s\n\n' "$(tr cli.description)"
+  printf 'mcserver-kit %s - %s\n\n' "$MCSERVER_KIT_VERSION" "$(tr cli.description)"
   tr cli.usage
   printf '\n'
   cat <<HELP
@@ -38,6 +45,7 @@ show_help() {
   mcserver-kit reset [--yes]
   mcserver-kit uninstall [--purge]
   mcserver-kit --lang <code> [command]
+  mcserver-kit --version
   mcserver-kit --help
 HELP
   printf '\n'
@@ -55,6 +63,7 @@ HELP
   printf '  %-20s %s\n' uninstall "$(tr cli.uninstall)"
   printf '  %-20s %s\n' 'uninstall --purge' "$(tr cli.uninstall_purge)"
   printf '  %-20s %s\n' help "$(tr cli.help)"
+  printf '  %-20s %s\n' version "$(tr cli.version)"
   printf '\n'
   tr cli.settings
   printf '\n'
@@ -66,7 +75,7 @@ HELP
 
 if [[ $# -eq 0 ]]; then
   if [[ -t 0 && -t 1 ]]; then
-    exec "${SCRIPT_DIR}/home-tui.sh"
+    exec "${LIBEXEC_DIR}/home-tui.sh"
   fi
   show_help
   exit 0
@@ -76,46 +85,49 @@ command_name="$1"
 case "$command_name" in
   home)
     shift
-    exec "${SCRIPT_DIR}/home-tui.sh" "$@"
+    exec "${LIBEXEC_DIR}/home-tui.sh" "$@"
     ;;
   create)
     shift || true
-    exec "${SCRIPT_DIR}/new-minecraft-server.sh" "$@"
+    exec "${LIBEXEC_DIR}/create-server.sh" "$@"
     ;;
   setup)
     shift
-    exec "${SCRIPT_DIR}/setup.sh" "$@"
+    exec "${LIBEXEC_DIR}/setup.sh" "$@"
     ;;
   config)
     shift
-    exec "${SCRIPT_DIR}/config-tui.sh" "$@"
+    exec "${LIBEXEC_DIR}/config-tui.sh" "$@"
     ;;
   templates)
     shift
-    exec "${SCRIPT_DIR}/config-tui.sh" templates "$@"
+    exec "${LIBEXEC_DIR}/config-tui.sh" templates "$@"
     ;;
   list)
     shift
-    exec "${SCRIPT_DIR}/server-manager.sh" list "$@"
+    exec "${LIBEXEC_DIR}/server-manager.sh" list "$@"
     ;;
   server)
     shift
-    exec "${SCRIPT_DIR}/server-manager.sh" server "$@"
+    exec "${LIBEXEC_DIR}/server-manager.sh" server "$@"
     ;;
   lang)
     shift
-    exec "${SCRIPT_DIR}/lang.sh" "$@"
+    exec "${LIBEXEC_DIR}/lang.sh" "$@"
     ;;
   reset)
     shift
-    exec "${SCRIPT_DIR}/reset.sh" "$@"
+    exec "${LIBEXEC_DIR}/reset.sh" "$@"
     ;;
   uninstall)
     shift
-    exec "${SCRIPT_DIR}/uninstall.sh" "$@"
+    exec "${LIBEXEC_DIR}/uninstall.sh" "$@"
     ;;
   help | --help | -h)
     show_help
+    ;;
+  version | --version | -V)
+    printf 'mcserver-kit %s\n' "$MCSERVER_KIT_VERSION"
     ;;
   *)
     tr cli.unknown "$command_name" >&2

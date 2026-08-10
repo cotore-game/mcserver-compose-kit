@@ -5,11 +5,13 @@ set -Eeuo pipefail
 # 実設定は config.yml、公開可能な見本は config.example.yml に分離します。
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="${MCSERVER_KIT_CONFIG:-${SCRIPT_DIR}/config.yml}"
-CONFIG_EXAMPLE="${SCRIPT_DIR}/config.example.yml"
-MCID_TEMPLATE_DIR="${MCSERVER_KIT_MCID_TEMPLATE_DIR:-${SCRIPT_DIR}/mcid-templates}"
-VERSION_DETECTOR="${SCRIPT_DIR}/scripts/detect-world-version.py"
-WINDOWS_DIALOG="${SCRIPT_DIR}/scripts/windows-dialog.ps1"
+ROOT_DIR="${MCSERVER_KIT_ROOT:-$(cd -- "${SCRIPT_DIR}/../.." && pwd)}"
+SHARE_DIR="${MCSERVER_KIT_SHARE_DIR:-${ROOT_DIR}/share/mcserver-kit}"
+CONFIG_FILE="${MCSERVER_KIT_CONFIG:-${ROOT_DIR}/config.yml}"
+CONFIG_EXAMPLE="${SHARE_DIR}/config.example.yml"
+MCID_TEMPLATE_DIR="${MCSERVER_KIT_MCID_TEMPLATE_DIR:-${SHARE_DIR}/mcid-templates}"
+VERSION_DETECTOR="${SCRIPT_DIR}/detect-world-version.py"
+WINDOWS_DIALOG="${SCRIPT_DIR}/windows-dialog.ps1"
 
 die() {
   printf 'エラー: %s\n' "$*" >&2
@@ -423,8 +425,8 @@ main() {
   printf '%s\n' \
     "設定ファイルがありません: ${CONFIG_FILE}" \
     "次のコマンドで見本をコピーし、秘密情報を記入してください:" \
-    "  cp \"${CONFIG_EXAMPLE}\" \"${SCRIPT_DIR}/config.yml\"" \
-    "  chmod 600 \"${SCRIPT_DIR}/config.yml\""
+    "  cp \"${CONFIG_EXAMPLE}\" \"${ROOT_DIR}/config.yml\"" \
+    "  chmod 600 \"${ROOT_DIR}/config.yml\""
   exit 1
 }
 

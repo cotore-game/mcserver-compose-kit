@@ -5,11 +5,13 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${MCSERVER_KIT_CONFIG:-${HOME}/.config/mcserver-compose-kit/config.yml}"
-CONFIG_VALUE="${SCRIPT_DIR}/scripts/config-value.py"
+ROOT_DIR="${MCSERVER_KIT_ROOT:-$(cd -- "${SCRIPT_DIR}/../.." && pwd)}"
+CONFIG_VALUE="${SCRIPT_DIR}/config-value.py"
+VERSION="$(head -n 1 "${ROOT_DIR}/VERSION" 2>/dev/null || printf unknown)"
 TEMP_FILES=()
 
-# shellcheck source=scripts/i18n.sh
-source "${SCRIPT_DIR}/scripts/i18n.sh"
+# shellcheck source=libexec/mcserver-kit/i18n.sh
+source "${SCRIPT_DIR}/i18n.sh"
 load_messages
 
 if [[ -z "${NEWT_COLORS:-}" ]]; then
@@ -105,7 +107,7 @@ dashboard_text() {
     shopt -u nullglob
   fi
   logo
-  printf '\n%s\n%s\n' "$(tr home.summary "$total" "$running")" "$(tr home.choose)"
+  printf '\n%s\n%s\n%s\n' "$(tr home.version "$VERSION")" "$(tr home.summary "$total" "$running")" "$(tr home.choose)"
 }
 
 pause_for_enter() {
@@ -226,7 +228,7 @@ main() {
   }
   root="$(server_root)"
   while true; do
-    choice="$(whiptail --backtitle 'mcserver-kit' --title 'Minecraft Server Kit' --menu "$(dashboard_text "$root")" 27 94 9 \
+    choice="$(whiptail --backtitle "mcserver-kit ${VERSION}" --title 'Minecraft Server Kit' --menu "$(dashboard_text "$root")" 27 94 9 \
       servers "$(tr home.servers)" \
       create "$(tr home.create)" \
       config "$(tr home.config)" \
@@ -240,14 +242,14 @@ main() {
       servers) servers_menu ;;
       create)
         clear
-        "${SCRIPT_DIR}/new-minecraft-server.sh" || true
+        "${SCRIPT_DIR}/create-server.sh" || true
         pause_for_enter
         ;;
       config) "${SCRIPT_DIR}/config-tui.sh" || true ;;
       templates) "${SCRIPT_DIR}/config-tui.sh" templates || true ;;
       language) language_menu ;;
       diagnostics) diagnostics ;;
-      help) run_and_show "$(tr home.help)" "${SCRIPT_DIR}/mcserver-kit" --help ;;
+      help) run_and_show "$(tr home.help)" "${ROOT_DIR}/mcserver-kit" --help ;;
       exit) return ;;
     esac
   done

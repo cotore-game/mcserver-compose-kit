@@ -7,8 +7,8 @@ CONFIG_FILE="${MCSERVER_KIT_CONFIG:-${HOME}/.config/mcserver-compose-kit/config.
 TEMPLATE_DIR="${MCSERVER_KIT_MCID_TEMPLATE_DIR:-${HOME}/.config/mcserver-compose-kit/mcid-templates}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-# shellcheck source=scripts/i18n.sh
-source "${SCRIPT_DIR}/scripts/i18n.sh"
+# shellcheck source=libexec/mcserver-kit/i18n.sh
+source "${SCRIPT_DIR}/i18n.sh"
 load_messages
 
 prompt() {

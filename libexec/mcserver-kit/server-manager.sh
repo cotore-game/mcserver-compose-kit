@@ -5,10 +5,10 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${MCSERVER_KIT_CONFIG:-${HOME}/.config/mcserver-compose-kit/config.yml}"
-CONFIG_VALUE="${SCRIPT_DIR}/scripts/config-value.py"
+CONFIG_VALUE="${SCRIPT_DIR}/config-value.py"
 
-# shellcheck source=scripts/i18n.sh
-source "${SCRIPT_DIR}/scripts/i18n.sh"
+# shellcheck source=libexec/mcserver-kit/i18n.sh
+source "${SCRIPT_DIR}/i18n.sh"
 load_messages
 
 die() {

@@ -167,31 +167,28 @@ ensure_dependencies() {
 }
 
 main() {
-  local source_dir
+  local source_dir source_version
 
   parse_arguments "$@"
   ensure_dependencies
 
-  if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/new-minecraft-server.sh" ]]; then
+  if [[ -n "$SCRIPT_DIR" && ( -f "${SCRIPT_DIR}/libexec/mcserver-kit/create-server.sh" || -f "${SCRIPT_DIR}/new-minecraft-server.sh" ) ]]; then
     source_dir="$SCRIPT_DIR"
   else
     source_dir="$(download_release)"
   fi
 
-  printf '[3/3] Installing to %s.\n' "$INSTALL_DIR"
+  source_version="$(head -n 1 "${source_dir}/VERSION" 2>/dev/null || true)"
+  if [[ -z "$source_version" && "$VERSION" != latest ]]; then
+    source_version="${VERSION#v}"
+  fi
+  source_version="${source_version:-unknown}"
+  printf '[3/3] Installing mcserver-kit %s to %s.\n' "$source_version" "$INSTALL_DIR"
   mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "${CONFIG_DIR}/mcid-templates" "$BIN_DIR"
-  install -m 755 "${source_dir}/new-minecraft-server.sh" "${INSTALL_DIR}/new-minecraft-server.sh"
   install -m 755 "${source_dir}/mcserver-kit" "${INSTALL_DIR}/mcserver-kit"
-  install -m 755 "${source_dir}/home-tui.sh" "${INSTALL_DIR}/home-tui.sh"
-  install -m 755 "${source_dir}/setup.sh" "${INSTALL_DIR}/setup.sh"
-  install -m 755 "${source_dir}/reset.sh" "${INSTALL_DIR}/reset.sh"
-  install -m 755 "${source_dir}/config-tui.sh" "${INSTALL_DIR}/config-tui.sh"
-  install -m 755 "${source_dir}/server-manager.sh" "${INSTALL_DIR}/server-manager.sh"
-  install -m 755 "${source_dir}/server-properties-tui.sh" "${INSTALL_DIR}/server-properties-tui.sh"
-  install -m 755 "${source_dir}/lang.sh" "${INSTALL_DIR}/lang.sh"
-  install -m 755 "${source_dir}/uninstall.sh" "${INSTALL_DIR}/uninstall.sh"
-  install -m 644 "${source_dir}/config.example.yml" "${INSTALL_DIR}/config.example.yml"
-  install -m 644 "${source_dir}/compose-example.yaml" "${INSTALL_DIR}/compose-example.yaml"
+  install -m 644 /dev/null "${INSTALL_DIR}/VERSION"
+  printf '%s\n' "$source_version" >"${INSTALL_DIR}/VERSION"
+  install -m 755 "${source_dir}/install.sh" "${INSTALL_DIR}/install.sh"
   install -m 644 "${source_dir}/README.md" "${INSTALL_DIR}/README.md"
   if [[ -f "${source_dir}/README-JA.md" ]]; then
     install -m 644 "${source_dir}/README-JA.md" "${INSTALL_DIR}/README-JA.md"
@@ -200,25 +197,57 @@ main() {
     install -m 644 "${source_dir}/CONTRIBUTING.md" "${INSTALL_DIR}/CONTRIBUTING.md"
   fi
   install -m 644 "${source_dir}/LICENSE" "${INSTALL_DIR}/LICENSE"
-  mkdir -p "${INSTALL_DIR}/scripts"
-  install -m 755 "${source_dir}/scripts/detect-world-version.py" "${INSTALL_DIR}/scripts/detect-world-version.py"
-  install -m 755 "${source_dir}/scripts/config-value.py" "${INSTALL_DIR}/scripts/config-value.py"
-  install -m 755 "${source_dir}/scripts/server-config.py" "${INSTALL_DIR}/scripts/server-config.py"
-  rm -f -- "${INSTALL_DIR}/scripts/server-property.py"
-  install -m 644 "${source_dir}/scripts/i18n.sh" "${INSTALL_DIR}/scripts/i18n.sh"
-  install -m 644 "${source_dir}/scripts/windows-dialog.ps1" "${INSTALL_DIR}/scripts/windows-dialog.ps1"
-  mkdir -p "${INSTALL_DIR}/locales"
-  cp -a "${source_dir}/locales/." "${INSTALL_DIR}/locales/"
+
+  if [[ -d "${source_dir}/libexec/mcserver-kit" ]]; then
+    mkdir -p "${INSTALL_DIR}/libexec/mcserver-kit" "${INSTALL_DIR}/share/mcserver-kit"
+    cp -a "${source_dir}/libexec/mcserver-kit/." "${INSTALL_DIR}/libexec/mcserver-kit/"
+    cp -a "${source_dir}/share/mcserver-kit/." "${INSTALL_DIR}/share/mcserver-kit/"
+    find "${INSTALL_DIR}/libexec/mcserver-kit" -maxdepth 1 -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod 755 {} +
+    rm -f -- "${INSTALL_DIR}/new-minecraft-server.sh" "${INSTALL_DIR}/home-tui.sh" \
+      "${INSTALL_DIR}/setup.sh" "${INSTALL_DIR}/reset.sh" "${INSTALL_DIR}/config-tui.sh" \
+      "${INSTALL_DIR}/server-manager.sh" "${INSTALL_DIR}/server-properties-tui.sh" \
+      "${INSTALL_DIR}/lang.sh" "${INSTALL_DIR}/uninstall.sh" \
+      "${INSTALL_DIR}/config.example.yml" "${INSTALL_DIR}/compose-example.yaml"
+    rm -rf -- "${INSTALL_DIR}/scripts" "${INSTALL_DIR}/locales"
+  else
+    install -m 755 "${source_dir}/new-minecraft-server.sh" "${INSTALL_DIR}/new-minecraft-server.sh"
+    install -m 755 "${source_dir}/home-tui.sh" "${INSTALL_DIR}/home-tui.sh"
+    install -m 755 "${source_dir}/setup.sh" "${INSTALL_DIR}/setup.sh"
+    install -m 755 "${source_dir}/reset.sh" "${INSTALL_DIR}/reset.sh"
+    install -m 755 "${source_dir}/config-tui.sh" "${INSTALL_DIR}/config-tui.sh"
+    install -m 755 "${source_dir}/server-manager.sh" "${INSTALL_DIR}/server-manager.sh"
+    install -m 755 "${source_dir}/server-properties-tui.sh" "${INSTALL_DIR}/server-properties-tui.sh"
+    install -m 755 "${source_dir}/lang.sh" "${INSTALL_DIR}/lang.sh"
+    install -m 755 "${source_dir}/uninstall.sh" "${INSTALL_DIR}/uninstall.sh"
+    install -m 644 "${source_dir}/config.example.yml" "${INSTALL_DIR}/config.example.yml"
+    install -m 644 "${source_dir}/compose-example.yaml" "${INSTALL_DIR}/compose-example.yaml"
+    mkdir -p "${INSTALL_DIR}/scripts" "${INSTALL_DIR}/locales"
+    install -m 755 "${source_dir}/scripts/detect-world-version.py" "${INSTALL_DIR}/scripts/detect-world-version.py"
+    install -m 755 "${source_dir}/scripts/config-value.py" "${INSTALL_DIR}/scripts/config-value.py"
+    install -m 755 "${source_dir}/scripts/server-config.py" "${INSTALL_DIR}/scripts/server-config.py"
+    rm -f -- "${INSTALL_DIR}/scripts/server-property.py"
+    install -m 644 "${source_dir}/scripts/i18n.sh" "${INSTALL_DIR}/scripts/i18n.sh"
+    install -m 644 "${source_dir}/scripts/windows-dialog.ps1" "${INSTALL_DIR}/scripts/windows-dialog.ps1"
+    cp -a "${source_dir}/locales/." "${INSTALL_DIR}/locales/"
+  fi
 
   if [[ ! -f "${CONFIG_DIR}/config.yml" ]]; then
-    install -m 600 "${source_dir}/config.example.yml" "${CONFIG_DIR}/config.yml"
+    if [[ -f "${source_dir}/share/mcserver-kit/config.example.yml" ]]; then
+      install -m 600 "${source_dir}/share/mcserver-kit/config.example.yml" "${CONFIG_DIR}/config.yml"
+    else
+      install -m 600 "${source_dir}/config.example.yml" "${CONFIG_DIR}/config.yml"
+    fi
   fi
   if [[ ! -f "$LANGUAGE_FILE" ]]; then
     printf 'en\n' >"$LANGUAGE_FILE"
     chmod 600 "$LANGUAGE_FILE"
   fi
   if ! find "${CONFIG_DIR}/mcid-templates" -maxdepth 1 -type f -name '*.txt' -print -quit | grep -q .; then
-    cp -a "${source_dir}/mcid-templates/." "${CONFIG_DIR}/mcid-templates/"
+    if [[ -d "${source_dir}/share/mcserver-kit/mcid-templates" ]]; then
+      cp -a "${source_dir}/share/mcserver-kit/mcid-templates/." "${CONFIG_DIR}/mcid-templates/"
+    else
+      cp -a "${source_dir}/mcid-templates/." "${CONFIG_DIR}/mcid-templates/"
+    fi
   fi
 
   cat >"${BIN_DIR}/mcserver-kit" <<LAUNCHER
@@ -230,12 +259,15 @@ export MCSERVER_KIT_SHELL_RC="\${MCSERVER_KIT_SHELL_RC:-${SHELL_RC}}"
 export MCSERVER_KIT_LANGUAGE_FILE="\${MCSERVER_KIT_LANGUAGE_FILE:-${LANGUAGE_FILE}}"
 export MCSERVER_KIT_CONFIG="\${MCSERVER_KIT_CONFIG:-${CONFIG_DIR}/config.yml}"
 export MCSERVER_KIT_MCID_TEMPLATE_DIR="\${MCSERVER_KIT_MCID_TEMPLATE_DIR:-${CONFIG_DIR}/mcid-templates}"
+export MCSERVER_KIT_ROOT="\${MCSERVER_KIT_ROOT:-${INSTALL_DIR}}"
+export MCSERVER_KIT_LIBEXEC_DIR="\${MCSERVER_KIT_LIBEXEC_DIR:-${INSTALL_DIR}/libexec/mcserver-kit}"
+export MCSERVER_KIT_SHARE_DIR="\${MCSERVER_KIT_SHARE_DIR:-${INSTALL_DIR}/share/mcserver-kit}"
 exec "${INSTALL_DIR}/mcserver-kit" "\$@"
 LAUNCHER
   chmod 755 "${BIN_DIR}/mcserver-kit"
   register_bin_path
 
-  printf '\nInstallation complete.\n'
+  printf '\nInstallation complete: mcserver-kit %s\n' "$source_version"
   printf 'Configuration: %s\n' "${CONFIG_DIR}/config.yml"
   printf 'PATH configuration: %s\n' "$SHELL_RC"
   if [[ ":$PATH:" != *":${BIN_DIR}:"* ]]; then

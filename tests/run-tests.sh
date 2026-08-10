@@ -2,10 +2,10 @@
 set -Eeuo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=../new-minecraft-server.sh
+# shellcheck source=../libexec/mcserver-kit/create-server.sh
 # The computed repository path is intentional.
 # shellcheck disable=SC1091
-source "${REPO_ROOT}/new-minecraft-server.sh"
+source "${REPO_ROOT}/libexec/mcserver-kit/create-server.sh"
 
 tests_run=0
 tests_skipped=0
@@ -53,7 +53,7 @@ test_version_resolution() {
   # The single-quoted script is intentional so the child shell expands $1.
   # shellcheck disable=SC2016
   assert_fails 'unknown versions are rejected in auto mode' \
-    bash -c 'source "$1"; resolve_minecraft_image "1.17.1" auto' _ "${REPO_ROOT}/new-minecraft-server.sh"
+    bash -c 'source "$1"; resolve_minecraft_image "1.17.1" auto' _ "${REPO_ROOT}/libexec/mcserver-kit/create-server.sh"
 }
 
 test_locales() {
@@ -61,7 +61,7 @@ test_locales() {
   local japanese_help
   local language_file="${TEST_TEMP_DIR}/language-preference"
 
-  python3 "${REPO_ROOT}/scripts/validate-locales.py" "${REPO_ROOT}/locales" >/dev/null
+  python3 "${REPO_ROOT}/scripts/validate-locales.py" "${REPO_ROOT}/share/mcserver-kit/locales" >/dev/null
   tests_run=$((tests_run + 1))
 
   english_help="$(bash "${REPO_ROOT}/mcserver-kit" --lang en --help)"
@@ -80,6 +80,27 @@ test_locales() {
 
   MCSERVER_KIT_LANGUAGE_FILE="$language_file" bash "${REPO_ROOT}/mcserver-kit" lang --en >/dev/null
   assert_equal 'en' "$(cat "$language_file")" 'the language command persists English'
+}
+
+test_locale_fallback() {
+  local locale_root="${TEST_TEMP_DIR}/locale-fallback"
+  local validation_log="${locale_root}/validation.log"
+  local output
+  mkdir -p "${locale_root}/locales"
+  cat >"${locale_root}/locales/en.json" <<'JSON'
+{"translated": "English", "new_key": "English fallback"}
+JSON
+  cat >"${locale_root}/locales/de.json" <<'JSON'
+{"translated": "Deutsch"}
+JSON
+
+  output="$(MCSERVER_KIT_ROOT="$REPO_ROOT" MCSERVER_KIT_SHARE_DIR="$locale_root" MCSERVER_KIT_LANG=de \
+    bash -c 'source "$1"; load_messages; printf "%s|%s" "$(tr translated)" "$(tr new_key)"' \
+      _ "${REPO_ROOT}/libexec/mcserver-kit/i18n.sh")"
+  assert_equal 'Deutsch|English fallback' "$output" 'missing translation keys fall back to English'
+  python3 "${REPO_ROOT}/scripts/validate-locales.py" "${locale_root}/locales" 2>"$validation_log" >/dev/null
+  assert_equal 'present' "$(grep -q 'missing keys use English fallback: new_key' "$validation_log" && printf present)" \
+    'locale validation reports missing translations without failing'
 }
 
 test_installer_version_selection() {
@@ -119,7 +140,7 @@ CONFIG
   assert_fails 'server creation is blocked until setup completes' \
     env MCSERVER_KIT_CONFIG="$config_file" \
       MCSERVER_KIT_MCID_TEMPLATE_DIR="$template_dir" \
-      bash "${REPO_ROOT}/new-minecraft-server.sh"
+      bash "${REPO_ROOT}/libexec/mcserver-kit/create-server.sh"
 }
 
 test_input_normalization() {
@@ -261,16 +282,19 @@ ui:
   windows_dialogs: false
 CONFIG
 
-  printf '%s\n' \
+  if ! printf '%s\n' \
     'spec-server' '' "$world_root" '' '' '' '' '' '' '' |
-  MCSERVER_KIT_CONFIG="$config_file" \
-      bash "${REPO_ROOT}/new-minecraft-server.sh" >"$output_log" 2>&1
+    MCSERVER_KIT_CONFIG="$config_file" \
+      bash "${REPO_ROOT}/libexec/mcserver-kit/create-server.sh" >"$output_log" 2>&1; then
+    cat "$output_log" >&2
+    return 1
+  fi
 
   assert_equal 'present' "$([[ -f "${target}/compose.yaml" ]] && printf present)" 'the creation flow writes compose.yaml'
   assert_equal 'present' "$([[ -f "${target}/.env" ]] && printf present)" 'the creation flow writes .env'
   assert_equal 'present' "$([[ -f "${target}/server.env" ]] && printf present)" 'the creation flow writes unified Minecraft settings'
   assert_equal 'present' "$(grep -q '^    env_file:$' "${target}/compose.yaml" && printf present)" 'Compose loads unified Minecraft settings'
-  assert_equal 'survival' "$(python3 "${REPO_ROOT}/scripts/server-config.py" get "${target}/server.env" MODE)" 'new servers default to survival mode'
+  assert_equal 'survival' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${target}/server.env" MODE)" 'new servers default to survival mode'
   assert_equal 'present' "$([[ -f "${target}/data/world/level.dat" ]] && printf present)" 'the creation flow copies the world'
   assert_equal 'present' "$(grep -q '\[5/5\].*Docker Compose設定を検証' "$output_log" && printf present)" 'the creation flow reports Compose validation progress'
 }
@@ -298,21 +322,25 @@ test_local_installation() {
   assert_equal 'present' "$([[ -x "${bin_dir}/mcserver-kit" ]] && printf present)" 'the installer creates the launcher'
   installed_help="$("${bin_dir}/mcserver-kit" --help)"
   assert_equal 'present' "$(grep -q 'mcserver-kit setup' <<<"$installed_help" && printf present)" 'the installed launcher exposes subcommand help'
+  assert_equal '1.1.0-dev' "$("${bin_dir}/mcserver-kit" --version | awk '{print $2}')" 'the installed launcher reports its version'
   assert_equal 'present' "$([[ -f "${config_dir}/config.yml" ]] && printf present)" 'the installer creates the initial config'
-  assert_equal 'present' "$([[ -f "${install_dir}/scripts/windows-dialog.ps1" ]] && printf present)" 'the installer includes the Windows dialog helper'
-  assert_equal 'present' "$([[ -x "${install_dir}/lang.sh" ]] && printf present)" 'the installer includes the language command'
-  assert_equal 'present' "$([[ -x "${install_dir}/server-manager.sh" ]] && printf present)" 'the installer includes the server manager'
-  assert_equal 'present' "$([[ -x "${install_dir}/server-properties-tui.sh" ]] && printf present)" 'the installer includes the properties TUI'
-  assert_equal 'present' "$([[ -x "${install_dir}/home-tui.sh" ]] && printf present)" 'the installer includes the home dashboard'
+  assert_equal 'present' "$([[ -f "${install_dir}/libexec/mcserver-kit/windows-dialog.ps1" ]] && printf present)" 'the installer includes the Windows dialog helper'
+  assert_equal 'present' "$([[ -x "${install_dir}/libexec/mcserver-kit/lang.sh" ]] && printf present)" 'the installer includes the language command'
+  assert_equal 'present' "$([[ -x "${install_dir}/libexec/mcserver-kit/server-manager.sh" ]] && printf present)" 'the installer includes the server manager'
+  assert_equal 'present' "$([[ -x "${install_dir}/libexec/mcserver-kit/server-properties-tui.sh" ]] && printf present)" 'the installer includes the properties TUI'
+  assert_equal 'present' "$([[ -x "${install_dir}/libexec/mcserver-kit/home-tui.sh" ]] && printf present)" 'the installer includes the home dashboard'
   assert_equal 'present' "$([[ -f "${install_dir}/README-JA.md" ]] && printf present)" 'the installer includes the Japanese README'
   assert_equal 'present' "$([[ -f "${install_dir}/CONTRIBUTING.md" ]] && printf present)" 'the installer includes the contribution guide'
-  assert_equal 'present' "$([[ -x "${install_dir}/scripts/server-config.py" ]] && printf present)" 'the installer includes the unified server settings editor'
+  assert_equal 'present' "$([[ -x "${install_dir}/libexec/mcserver-kit/server-config.py" ]] && printf present)" 'the installer includes the unified server settings editor'
   assert_equal 'en' "$(cat "${config_dir}/language")" 'the installer defaults to English'
   assert_equal '1' "$(grep -Fxc '# >>> mcserver-kit PATH >>>' "$shell_rc")" 'the installer registers one managed PATH block'
   assert_equal 'present' "$(grep -q 'mcserver-kit setup' "$install_log" && printf present)" 'the installer instructs the user to run setup'
+  assert_equal 'present' "$(grep -q 'mcserver-kit 1.1.0-dev' "$install_log" && printf present)" 'the installer shows the installed version'
   assert_equal 'absent' "$(! grep -q '初回セットアップを開始' "$install_log" && printf absent)" 'the installer does not start setup automatically'
 
   printf '\n# preserve-on-update\n' >>"${config_dir}/config.yml"
+  : >"${install_dir}/new-minecraft-server.sh"
+  mkdir -p "${install_dir}/scripts" "${install_dir}/locales"
   : >"${install_dir}/scripts/server-property.py"
   PATH="${fake_bin}:$PATH" \
     MCSERVER_KIT_INSTALL_DIR="$install_dir" \
@@ -322,7 +350,8 @@ test_local_installation() {
     bash "${REPO_ROOT}/install.sh" >>"$install_log"
   assert_equal 'present' "$(grep -q 'preserve-on-update' "${config_dir}/config.yml" && printf present)" 'updating preserves config.yml'
   assert_equal '1' "$(grep -Fxc '# >>> mcserver-kit PATH >>>' "$shell_rc")" 'updating does not duplicate the PATH block'
-  assert_equal 'absent' "$([[ ! -e "${install_dir}/scripts/server-property.py" ]] && printf absent)" 'updating removes the obsolete property editor'
+  assert_equal 'absent' "$([[ ! -e "${install_dir}/scripts/server-property.py" ]] && printf absent)" 'updating removes the obsolete scripts directory'
+  assert_equal 'absent' "$([[ ! -e "${install_dir}/new-minecraft-server.sh" ]] && printf absent)" 'updating removes obsolete flat-layout commands'
 
   "${bin_dir}/mcserver-kit" uninstall >>"$install_log"
   assert_equal 'absent' "$([[ ! -d "$install_dir" ]] && printf absent)" 'the uninstaller removes installed program files'
@@ -433,10 +462,10 @@ access:
 CONFIG
   chmod 600 "$config_file"
 
-  assert_equal 'BeforeOwner' "$(python3 "${REPO_ROOT}/scripts/config-value.py" get "$config_file" owner minecraft_id)" 'config editor reads scalar values'
-  python3 "${REPO_ROOT}/scripts/config-value.py" set "$config_file" owner minecraft_id 'AfterOwner'
-  assert_equal 'AfterOwner' "$(python3 "${REPO_ROOT}/scripts/config-value.py" get "$config_file" owner minecraft_id)" 'config editor updates scalar values'
-  assert_equal 'default' "$(python3 "${REPO_ROOT}/scripts/config-value.py" get "$config_file" access whitelist_template)" 'config editor preserves unrelated settings'
+  assert_equal 'BeforeOwner' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/config-value.py" get "$config_file" owner minecraft_id)" 'config editor reads scalar values'
+  python3 "${REPO_ROOT}/libexec/mcserver-kit/config-value.py" set "$config_file" owner minecraft_id 'AfterOwner'
+  assert_equal 'AfterOwner' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/config-value.py" get "$config_file" owner minecraft_id)" 'config editor updates scalar values'
+  assert_equal 'default' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/config-value.py" get "$config_file" access whitelist_template)" 'config editor preserves unrelated settings'
   assert_equal '600' "$(stat -c '%a' "$config_file")" 'config editor preserves restricted permissions'
 }
 
@@ -513,23 +542,23 @@ pvp=true
 view-distance=10
 PROPERTIES
 
-  python3 "${REPO_ROOT}/scripts/server-config.py" migrate "$server_dir"
+  python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" migrate "$server_dir"
   assert_equal 'present' "$([[ -f "${server_dir}/compose.yaml.mcserver-kit.bak" ]] && printf present)" 'migration backs up the original Compose file'
   assert_equal 'present' "$(grep -q '^      DIFFICULTY:' "${server_dir}/compose.yaml.mcserver-kit.bak" && printf present)" 'the migration backup preserves original settings'
-  assert_equal 'Existing MOTD' "$(python3 "${REPO_ROOT}/scripts/server-config.py" get "$server_env" MOTD)" 'migration resolves existing Compose interpolation'
-  assert_equal 'normal' "$(python3 "${REPO_ROOT}/scripts/server-config.py" get "$server_env" DIFFICULTY)" 'migration prefers existing Compose settings over server.properties'
-  assert_equal 'true' "$(python3 "${REPO_ROOT}/scripts/server-config.py" get "$server_env" PVP)" 'migration imports properties not managed by Compose'
-  assert_equal 'Alice,Bob' "$(python3 "${REPO_ROOT}/scripts/server-config.py" get "$server_env" WHITELIST)" 'migration imports the existing whitelist'
-  assert_equal 'true' "$(python3 "${REPO_ROOT}/scripts/server-config.py" get "$server_env" ENABLE_WHITELIST)" 'migration keeps a configured whitelist enabled'
+  assert_equal 'Existing MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "$server_env" MOTD)" 'migration resolves existing Compose interpolation'
+  assert_equal 'normal' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "$server_env" DIFFICULTY)" 'migration prefers existing Compose settings over server.properties'
+  assert_equal 'true' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "$server_env" PVP)" 'migration imports properties not managed by Compose'
+  assert_equal 'Alice,Bob' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "$server_env" WHITELIST)" 'migration imports the existing whitelist'
+  assert_equal 'true' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "$server_env" ENABLE_WHITELIST)" 'migration keeps a configured whitelist enabled'
   assert_equal 'present' "$(grep -q '^    env_file:$' "${server_dir}/compose.yaml" && printf present)" 'migration adds server.env to Compose'
   assert_equal 'absent' "$(! grep -q '^      DIFFICULTY:' "${server_dir}/compose.yaml" && printf absent)" 'migration removes conflicting Compose property values'
   assert_equal '600' "$(stat -c '%a' "$server_env")" 'unified settings are private'
 
-  python3 "${REPO_ROOT}/scripts/server-config.py" migrate "$server_dir"
+  python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" migrate "$server_dir"
   assert_equal '1' "$(grep -c '^      - server.env$' "${server_dir}/compose.yaml")" 'migration is idempotent'
 
-  python3 "${REPO_ROOT}/scripts/server-config.py" set "$server_env" DIFFICULTY hard
-  assert_equal 'hard' "$(python3 "${REPO_ROOT}/scripts/server-config.py" get "$server_env" DIFFICULTY)" 'the settings editor updates server.env atomically'
+  python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" set "$server_env" DIFFICULTY hard
+  assert_equal 'hard' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "$server_env" DIFFICULTY)" 'the settings editor updates server.env atomically'
   assert_equal 'present' "$(grep -q '^difficulty=easy$' "$properties" && printf present)" 'migration does not directly rewrite server.properties'
 
   mkdir -p "$fake_bin"
@@ -555,8 +584,8 @@ WHIPTAIL
   chmod +x "${fake_bin}/docker" "${fake_bin}/whiptail"
   PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
     MCSERVER_KIT_TEST_WHIPTAIL_STATE="$whiptail_state" \
-    bash "${REPO_ROOT}/server-properties-tui.sh" alpha "$server_dir" >/dev/null
-  assert_equal 'Unified MOTD' "$(python3 "${REPO_ROOT}/scripts/server-config.py" get "$server_env" MOTD)" 'the properties TUI updates unified settings'
+    bash "${REPO_ROOT}/libexec/mcserver-kit/server-properties-tui.sh" alpha "$server_dir" >/dev/null
+  assert_equal 'Unified MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "$server_env" MOTD)" 'the properties TUI updates unified settings'
 }
 
 main() {
@@ -565,6 +594,7 @@ main() {
 
   test_version_resolution
   test_locales
+  test_locale_fallback
   test_installer_version_selection
   test_setup_gate "$TEST_TEMP_DIR"
   test_input_normalization

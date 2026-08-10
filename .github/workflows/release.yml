@@ -22,36 +22,29 @@ jobs:
 
       - name: Run checks
         run: |
-          bash -n mcserver-kit home-tui.sh new-minecraft-server.sh setup.sh reset.sh config-tui.sh server-manager.sh server-properties-tui.sh lang.sh install.sh uninstall.sh tests/run-tests.sh
-          python3 -m py_compile scripts/config-value.py scripts/detect-world-version.py scripts/server-config.py scripts/validate-locales.py
-          python3 scripts/validate-locales.py
-          shellcheck -x mcserver-kit home-tui.sh new-minecraft-server.sh setup.sh reset.sh config-tui.sh server-manager.sh server-properties-tui.sh lang.sh install.sh uninstall.sh tests/run-tests.sh
+          bash -n mcserver-kit install.sh libexec/mcserver-kit/*.sh tests/run-tests.sh
+          python3 -m py_compile libexec/mcserver-kit/*.py scripts/validate-locales.py
+          python3 scripts/validate-locales.py share/mcserver-kit/locales
+          shellcheck -x mcserver-kit install.sh libexec/mcserver-kit/*.sh tests/run-tests.sh
           bash tests/run-tests.sh
 
       - name: Build release archive
         run: |
           mkdir -p dist/mcserver-compose-kit
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            printf '%s\n' "${GITHUB_REF_NAME#v}" > VERSION
+          fi
           cp -a \
-            new-minecraft-server.sh \
             mcserver-kit \
-            home-tui.sh \
-            setup.sh \
-            reset.sh \
-            config-tui.sh \
-            server-manager.sh \
-            server-properties-tui.sh \
-            lang.sh \
             install.sh \
-            uninstall.sh \
-            config.example.yml \
-            compose-example.yaml \
+            VERSION \
             README.md \
             README-JA.md \
             CONTRIBUTING.md \
             LICENSE \
+            libexec \
+            share \
             scripts \
-            locales \
-            mcid-templates \
             dist/mcserver-compose-kit/
           tar -C dist -czf dist/mcserver-compose-kit.tar.gz mcserver-compose-kit
           cd dist

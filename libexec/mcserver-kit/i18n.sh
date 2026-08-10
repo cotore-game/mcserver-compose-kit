@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
-I18N_ROOT="${I18N_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
-I18N_LOCALE_DIR="${I18N_ROOT}/locales"
+I18N_ROOT="${MCSERVER_KIT_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)}"
+I18N_SHARE_DIR="${MCSERVER_KIT_SHARE_DIR:-${I18N_ROOT}/share/mcserver-kit}"
+I18N_LOCALE_DIR="${I18N_SHARE_DIR}/locales"
 declare -A I18N_MESSAGES=()
 
 detect_language() {
@@ -27,10 +28,22 @@ detect_language() {
 load_messages() {
   local language="${1:-$(detect_language)}"
   local catalog="${I18N_LOCALE_DIR}/${language}.json"
+  local english_catalog="${I18N_LOCALE_DIR}/en.json"
   local key
   local encoded
 
-  [[ -f "$catalog" ]] || catalog="${I18N_LOCALE_DIR}/en.json"
+  [[ -f "$catalog" ]] || catalog="$english_catalog"
+  load_catalog "$english_catalog"
+  if [[ "$catalog" != "$english_catalog" ]]; then
+    load_catalog "$catalog"
+  fi
+  MCSERVER_KIT_ACTIVE_LANG="$(basename "$catalog" .json)"
+  export MCSERVER_KIT_ACTIVE_LANG
+}
+
+load_catalog() {
+  local catalog="$1"
+  local key encoded
   while IFS=$'\t' read -r key encoded; do
     [[ -n "$key" ]] || continue
     I18N_MESSAGES["$key"]="$(printf '%s' "$encoded" | base64 --decode)"
@@ -46,8 +59,6 @@ for key, value in messages.items():
     print(f"{key}\t{encoded}")
 PYTHON
   )
-  MCSERVER_KIT_ACTIVE_LANG="$(basename "$catalog" .json)"
-  export MCSERVER_KIT_ACTIVE_LANG
 }
 
 tr() {

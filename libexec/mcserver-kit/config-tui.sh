@@ -6,7 +6,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${MCSERVER_KIT_CONFIG:-${HOME}/.config/mcserver-compose-kit/config.yml}"
 TEMPLATE_DIR="${MCSERVER_KIT_MCID_TEMPLATE_DIR:-${HOME}/.config/mcserver-compose-kit/mcid-templates}"
-CONFIG_VALUE="${SCRIPT_DIR}/scripts/config-value.py"
+CONFIG_VALUE="${SCRIPT_DIR}/config-value.py"
 
 # Keep whiptail readable on terminals whose default newt theme uses a bright
 # magenta selection. Users can override this with MCSERVER_KIT_TUI_COLORS or
@@ -31,8 +31,8 @@ actcheckbox=white,blue
 }"
 fi
 
-# shellcheck source=scripts/i18n.sh
-source "${SCRIPT_DIR}/scripts/i18n.sh"
+# shellcheck source=libexec/mcserver-kit/i18n.sh
+source "${SCRIPT_DIR}/i18n.sh"
 load_messages
 
 command -v whiptail >/dev/null 2>&1 || {

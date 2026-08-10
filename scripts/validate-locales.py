@@ -32,12 +32,14 @@ def main() -> int:
         catalog = load_catalog(path)
         missing = sorted(source.keys() - catalog.keys())
         extra = sorted(catalog.keys() - source.keys())
-        if missing or extra:
+        if missing:
+            print(
+                f"{path}: missing keys use English fallback: {', '.join(missing)}",
+                file=sys.stderr,
+            )
+        if extra:
             failed = True
-            if missing:
-                print(f"{path}: missing keys: {', '.join(missing)}", file=sys.stderr)
-            if extra:
-                print(f"{path}: extra keys: {', '.join(extra)}", file=sys.stderr)
+            print(f"{path}: extra keys: {', '.join(extra)}", file=sys.stderr)
 
     if failed:
         return 1

@@ -7,11 +7,11 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_ID="${1-}"
 SERVER_DIR="${2-}"
 SERVER_ENV="${SERVER_DIR}/server.env"
-CONFIG_TOOL="${SCRIPT_DIR}/scripts/server-config.py"
+CONFIG_TOOL="${SCRIPT_DIR}/server-config.py"
 changed=false
 
-# shellcheck source=scripts/i18n.sh
-source "${SCRIPT_DIR}/scripts/i18n.sh"
+# shellcheck source=libexec/mcserver-kit/i18n.sh
+source "${SCRIPT_DIR}/i18n.sh"
 load_messages
 
 if [[ -z "${NEWT_COLORS:-}" ]]; then
