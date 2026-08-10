@@ -304,6 +304,8 @@ test_local_installation() {
   assert_equal 'present' "$([[ -x "${install_dir}/server-manager.sh" ]] && printf present)" 'the installer includes the server manager'
   assert_equal 'present' "$([[ -x "${install_dir}/server-properties-tui.sh" ]] && printf present)" 'the installer includes the properties TUI'
   assert_equal 'present' "$([[ -x "${install_dir}/home-tui.sh" ]] && printf present)" 'the installer includes the home dashboard'
+  assert_equal 'present' "$([[ -f "${install_dir}/README-JA.md" ]] && printf present)" 'the installer includes the Japanese README'
+  assert_equal 'present' "$([[ -f "${install_dir}/CONTRIBUTING.md" ]] && printf present)" 'the installer includes the contribution guide'
   assert_equal 'present' "$([[ -x "${install_dir}/scripts/server-config.py" ]] && printf present)" 'the installer includes the unified server settings editor'
   assert_equal 'en' "$(cat "${config_dir}/language")" 'the installer defaults to English'
   assert_equal '1' "$(grep -Fxc '# >>> mcserver-kit PATH >>>' "$shell_rc")" 'the installer registers one managed PATH block'
