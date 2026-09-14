@@ -172,7 +172,7 @@ main() {
   parse_arguments "$@"
   ensure_dependencies
 
-  if [[ -n "$SCRIPT_DIR" && ( -f "${SCRIPT_DIR}/libexec/mcserver-kit/create-server.sh" || -f "${SCRIPT_DIR}/new-minecraft-server.sh" ) ]]; then
+  if [[ "${MCSERVER_KIT_FORCE_RELEASE_DOWNLOAD:-false}" != true && -n "$SCRIPT_DIR" && ( -f "${SCRIPT_DIR}/libexec/mcserver-kit/create-server.sh" || -f "${SCRIPT_DIR}/new-minecraft-server.sh" ) ]]; then
     source_dir="$SCRIPT_DIR"
   else
     source_dir="$(download_release)"

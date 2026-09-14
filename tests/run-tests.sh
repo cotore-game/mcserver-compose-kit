@@ -127,6 +127,77 @@ test_installer_version_selection() {
     'installer can run from a pipe without BASH_SOURCE errors'
 }
 
+test_update_check() {
+  local temp_dir="$1"
+  local fake_bin="${temp_dir}/update/bin"
+  local cache_dir="${temp_dir}/update/cache"
+  local curl_count="${temp_dir}/update/curl-count"
+  local fake_root="${temp_dir}/update/fake-root"
+  local install_log="${temp_dir}/update/install-log"
+  local output
+
+  mkdir -p "$fake_bin"
+  cat >"${fake_bin}/curl" <<'CURL'
+#!/usr/bin/env bash
+printf x >>"$MCSERVER_KIT_TEST_CURL_COUNT"
+printf '%s' "$MCSERVER_KIT_TEST_LATEST_URL"
+CURL
+  chmod +x "${fake_bin}/curl"
+
+  output="$(PATH="${fake_bin}:$PATH" \
+    MCSERVER_KIT_CURRENT_VERSION=1.1.0 \
+    MCSERVER_KIT_UPDATE_CACHE_DIR="$cache_dir" \
+    MCSERVER_KIT_TEST_CURL_COUNT="$curl_count" \
+    MCSERVER_KIT_TEST_LATEST_URL='https://github.com/cotore-game/mcserver-compose-kit/releases/tag/v1.1.1' \
+    MCSERVER_KIT_LANG=en \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/update.sh" check)"
+  assert_equal 'Update available: v1.1.0 -> v1.1.1' "$output" 'explicit update checks compare the installed and latest releases'
+
+  output="$(PATH="${fake_bin}:$PATH" \
+    MCSERVER_KIT_CURRENT_VERSION=1.1.0 \
+    MCSERVER_KIT_UPDATE_CACHE_DIR="$cache_dir" \
+    MCSERVER_KIT_TEST_CURL_COUNT="$curl_count" \
+    MCSERVER_KIT_TEST_LATEST_URL='https://example.invalid/should-not-be-fetched' \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/update.sh" --cached-quiet)"
+  assert_equal 'v1.1.1' "$output" 'automatic checks reuse a fresh cached release'
+  assert_equal '1' "$(wc -c <"$curl_count" | tr -d ' ')" 'a fresh update cache avoids another network request'
+  assert_equal '600' "$(stat -c '%a' "${cache_dir}/update-check")" 'the update cache is private'
+
+  output="$(PATH="${fake_bin}:$PATH" \
+    MCSERVER_KIT_CURRENT_VERSION=1.1.1 \
+    MCSERVER_KIT_UPDATE_CACHE_DIR="${temp_dir}/update/current-cache" \
+    MCSERVER_KIT_TEST_CURL_COUNT="$curl_count" \
+    MCSERVER_KIT_TEST_LATEST_URL='https://github.com/cotore-game/mcserver-compose-kit/releases/tag/v1.1.1' \
+    MCSERVER_KIT_LANG=en \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/update.sh" check)"
+  assert_equal 'v1.1.1 is up to date.' "$output" 'update checks report when the installed release is current'
+
+  MCSERVER_KIT_CURRENT_VERSION=1.1.2 \
+    MCSERVER_KIT_UPDATE_CACHE_DIR="${temp_dir}/update/newer-cache" \
+    MCSERVER_KIT_TEST_CURL_COUNT="$curl_count" \
+    MCSERVER_KIT_TEST_LATEST_URL='https://github.com/cotore-game/mcserver-compose-kit/releases/tag/v1.1.1' \
+    PATH="${fake_bin}:$PATH" \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/update.sh" --cached-quiet >"${temp_dir}/update/newer-output"
+  assert_equal 'empty' "$([[ ! -s "${temp_dir}/update/newer-output" ]] && printf empty)" 'automatic checks do not offer an older release'
+
+  mkdir -p "$fake_root"
+  printf '1.1.0\n' >"${fake_root}/VERSION"
+  cat >"${fake_root}/install.sh" <<'INSTALLER'
+#!/usr/bin/env bash
+printf '%s|%s\n' "${MCSERVER_KIT_FORCE_RELEASE_DOWNLOAD:-false}" "$*" >"$MCSERVER_KIT_TEST_INSTALL_LOG"
+INSTALLER
+  PATH="${fake_bin}:$PATH" \
+    MCSERVER_KIT_ROOT="$fake_root" \
+    MCSERVER_KIT_SHARE_DIR="${REPO_ROOT}/share/mcserver-kit" \
+    MCSERVER_KIT_UPDATE_CACHE_DIR="${temp_dir}/update/install-cache" \
+    MCSERVER_KIT_TEST_CURL_COUNT="$curl_count" \
+    MCSERVER_KIT_TEST_LATEST_URL='https://github.com/cotore-game/mcserver-compose-kit/releases/tag/v1.1.1' \
+    MCSERVER_KIT_TEST_INSTALL_LOG="$install_log" \
+    MCSERVER_KIT_LANG=en \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/update.sh" --yes >/dev/null
+  assert_equal 'true|--version v1.1.1' "$(cat "$install_log")" 'confirmed updates force installation from the selected release'
+}
+
 test_setup_gate() {
   local temp_dir="$1"
   local config_file="${temp_dir}/setup-gate/config.yml"
@@ -307,6 +378,7 @@ test_local_installation() {
   local fake_bin="${temp_dir}/install/fake-bin"
   local install_log="${temp_dir}/install/install.log"
   local shell_rc="${temp_dir}/install/bashrc"
+  local update_cache="${temp_dir}/install/cache"
   local installed_help
 
   mkdir -p "$fake_bin"
@@ -329,6 +401,7 @@ test_local_installation() {
   assert_equal 'present' "$([[ -x "${install_dir}/libexec/mcserver-kit/server-manager.sh" ]] && printf present)" 'the installer includes the server manager'
   assert_equal 'present' "$([[ -x "${install_dir}/libexec/mcserver-kit/server-properties-tui.sh" ]] && printf present)" 'the installer includes the properties TUI'
   assert_equal 'present' "$([[ -x "${install_dir}/libexec/mcserver-kit/home-tui.sh" ]] && printf present)" 'the installer includes the home dashboard'
+  assert_equal 'present' "$([[ -x "${install_dir}/libexec/mcserver-kit/update.sh" ]] && printf present)" 'the installer includes the update command'
   assert_equal 'present' "$([[ -f "${install_dir}/README-JA.md" ]] && printf present)" 'the installer includes the Japanese README'
   assert_equal 'present' "$([[ -f "${install_dir}/CONTRIBUTING.md" ]] && printf present)" 'the installer includes the contribution guide'
   assert_equal 'present' "$([[ -x "${install_dir}/libexec/mcserver-kit/server-config.py" ]] && printf present)" 'the installer includes the unified server settings editor'
@@ -353,10 +426,13 @@ test_local_installation() {
   assert_equal 'absent' "$([[ ! -e "${install_dir}/scripts/server-property.py" ]] && printf absent)" 'updating removes the obsolete scripts directory'
   assert_equal 'absent' "$([[ ! -e "${install_dir}/new-minecraft-server.sh" ]] && printf absent)" 'updating removes obsolete flat-layout commands'
 
-  "${bin_dir}/mcserver-kit" uninstall >>"$install_log"
+  mkdir -p "$update_cache"
+  : >"${update_cache}/update-check"
+  MCSERVER_KIT_UPDATE_CACHE_DIR="$update_cache" "${bin_dir}/mcserver-kit" uninstall >>"$install_log"
   assert_equal 'absent' "$([[ ! -d "$install_dir" ]] && printf absent)" 'the uninstaller removes installed program files'
   assert_equal 'present' "$([[ -f "${config_dir}/config.yml" ]] && printf present)" 'the uninstaller preserves config by default'
   assert_equal 'absent' "$(! grep -q 'mcserver-kit PATH' "$shell_rc" && printf absent)" 'the uninstaller removes its managed PATH block'
+  assert_equal 'absent' "$([[ ! -e "${update_cache}/update-check" ]] && printf absent)" 'the uninstaller removes the toolkit update cache'
 }
 
 test_home_dashboard() {
@@ -364,6 +440,8 @@ test_home_dashboard() {
   local config_file="${temp_dir}/home/config.yml"
   local fake_bin="${temp_dir}/home/bin"
   local whiptail_log="${temp_dir}/home/whiptail.log"
+  local update_cache="${temp_dir}/home/update-cache"
+  local curl_count="${temp_dir}/home/curl-count"
   local output
 
   mkdir -p "$fake_bin"
@@ -376,16 +454,24 @@ CONFIG
 printf '%s\n' "$*" >>"$MCSERVER_KIT_TEST_WHIPTAIL_LOG"
 printf 'exit' >&2
 WHIPTAIL
-  chmod +x "${fake_bin}/whiptail"
+  cat >"${fake_bin}/curl" <<'CURL'
+#!/usr/bin/env bash
+printf x >>"$MCSERVER_KIT_TEST_CURL_COUNT"
+printf '%s' 'https://github.com/cotore-game/mcserver-compose-kit/releases/tag/v1.1.1'
+CURL
+  chmod +x "${fake_bin}/whiptail" "${fake_bin}/curl"
 
   output="$(MCSERVER_KIT_LANG=en bash "${REPO_ROOT}/mcserver-kit")"
   assert_equal 'present' "$(grep -q 'mcserver-kit home' <<<"$output" && printf present)" 'non-interactive no-argument use shows help instead of starting creation'
 
   PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_CURRENT_VERSION=1.1.0 MCSERVER_KIT_UPDATE_CACHE_DIR="$update_cache" \
+    MCSERVER_KIT_TEST_CURL_COUNT="$curl_count" \
     MCSERVER_KIT_TUI_TEST=true MCSERVER_KIT_TEST_WHIPTAIL_LOG="$whiptail_log" \
     bash "${REPO_ROOT}/mcserver-kit" home
   assert_equal 'present' "$(grep -q -- '--backtitle mcserver-kit' "$whiptail_log" && printf present)" 'the home command opens the interactive dashboard'
   assert_equal 'present' "$(grep -q 'servers Servers' "$whiptail_log" && printf present)" 'the dashboard exposes server management'
+  assert_equal 'present' "$(grep -q 'Update available: v1.1.1' "$whiptail_log" && printf present)" 'the dashboard announces a newer cached release'
 }
 
 test_setup_command() {
@@ -596,6 +682,7 @@ main() {
   test_locales
   test_locale_fallback
   test_installer_version_selection
+  test_update_check "$TEST_TEMP_DIR"
   test_setup_gate "$TEST_TEMP_DIR"
   test_input_normalization
   test_world_discovery "$TEST_TEMP_DIR"
