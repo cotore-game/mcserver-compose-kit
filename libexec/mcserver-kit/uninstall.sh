@@ -6,6 +6,7 @@ CONFIG_DIR="${MCSERVER_KIT_CONFIG_DIR:-${HOME}/.config/mcserver-compose-kit}"
 BIN_PATH="${MCSERVER_KIT_BIN_DIR:-${HOME}/.local/bin}/mcserver-kit"
 UNINSTALL_BIN_PATH="${MCSERVER_KIT_BIN_DIR:-${HOME}/.local/bin}/mcserver-kit-uninstall"
 SHELL_RC="${MCSERVER_KIT_SHELL_RC:-${HOME}/.bashrc}"
+CACHE_DIR="${MCSERVER_KIT_UPDATE_CACHE_DIR:-${HOME}/.cache/mcserver-compose-kit}"
 PATH_BLOCK_START='# >>> mcserver-kit PATH >>>'
 PATH_BLOCK_END='# <<< mcserver-kit PATH <<<'
 
@@ -27,6 +28,8 @@ unregister_bin_path() {
 rm -rf -- "$INSTALL_DIR"
 rm -f -- "$BIN_PATH"
 rm -f -- "$UNINSTALL_BIN_PATH"
+rm -f -- "${CACHE_DIR}/update-check"
+rmdir -- "$CACHE_DIR" 2>/dev/null || true
 unregister_bin_path
 
 if [[ "${1-}" == '--purge' ]]; then

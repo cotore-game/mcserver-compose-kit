@@ -93,7 +93,7 @@ LOGO
 }
 
 dashboard_text() {
-  local root="$1"
+  local root="$1" latest=''
   local total=0 running=0 directory
   if [[ -d "$root" ]]; then
     shopt -s nullglob
@@ -107,7 +107,10 @@ dashboard_text() {
     shopt -u nullglob
   fi
   logo
-  printf '\n%s\n%s\n%s\n' "$(tr home.version "$VERSION")" "$(tr home.summary "$total" "$running")" "$(tr home.choose)"
+  latest="$("${SCRIPT_DIR}/update.sh" --cached-quiet 2>/dev/null || true)"
+  printf '\n%s\n%s\n' "$(tr home.version "$VERSION")" "$(tr home.summary "$total" "$running")"
+  [[ -n "$latest" ]] && printf '%s\n' "$(tr home.update_available "$latest")"
+  printf '%s\n' "$(tr home.choose)"
 }
 
 pause_for_enter() {
@@ -228,13 +231,14 @@ main() {
   }
   root="$(server_root)"
   while true; do
-    choice="$(whiptail --backtitle "mcserver-kit ${VERSION}" --title 'Minecraft Server Kit' --menu "$(dashboard_text "$root")" 27 94 9 \
+    choice="$(whiptail --backtitle "mcserver-kit ${VERSION}" --title 'Minecraft Server Kit' --menu "$(dashboard_text "$root")" 28 94 10 \
       servers "$(tr home.servers)" \
       create "$(tr home.create)" \
       config "$(tr home.config)" \
       templates "$(tr home.templates)" \
       language "$(tr home.language)" \
       diagnostics "$(tr home.diagnostics)" \
+      update "$(tr home.update)" \
       help "$(tr home.help)" \
       exit "$(tr home.exit)" \
       3>&1 1>&2 2>&3)" || return
@@ -249,6 +253,13 @@ main() {
       templates) "${SCRIPT_DIR}/config-tui.sh" templates || true ;;
       language) language_menu ;;
       diagnostics) diagnostics ;;
+      update)
+        clear
+        if "${SCRIPT_DIR}/update.sh"; then
+          exec "${ROOT_DIR}/mcserver-kit" home
+        fi
+        pause_for_enter
+        ;;
       help) run_and_show "$(tr home.help)" "${ROOT_DIR}/mcserver-kit" --help ;;
       exit) return ;;
     esac

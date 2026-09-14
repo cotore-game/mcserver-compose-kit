@@ -42,6 +42,7 @@ show_help() {
   mcserver-kit list
   mcserver-kit server <server-id> <action>
   mcserver-kit lang --ja|--en
+  mcserver-kit update [check]
   mcserver-kit reset [--yes]
   mcserver-kit uninstall [--purge]
   mcserver-kit --lang <code> [command]
@@ -59,6 +60,7 @@ HELP
   printf '  %-20s %s\n' list "$(tr cli.list)"
   printf '  %-20s %s\n' server "$(tr cli.server)"
   printf '  %-20s %s\n' lang "$(tr cli.lang)"
+  printf '  %-20s %s\n' update "$(tr cli.update)"
   printf '  %-20s %s\n' reset "$(tr cli.reset)"
   printf '  %-20s %s\n' uninstall "$(tr cli.uninstall)"
   printf '  %-20s %s\n' 'uninstall --purge' "$(tr cli.uninstall_purge)"
@@ -114,6 +116,10 @@ case "$command_name" in
   lang)
     shift
     exec "${LIBEXEC_DIR}/lang.sh" "$@"
+    ;;
+  update)
+    shift
+    exec "${LIBEXEC_DIR}/update.sh" "$@"
     ;;
   reset)
     shift

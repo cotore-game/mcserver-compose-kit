@@ -13,6 +13,7 @@ The toolkit creates an independent Docker Compose project for each server. Run `
 - Detects the saved Minecraft version and suggests a matching Java image
 - Creates a separate `compose.yaml`, `.env`, `server.env`, and `data/` directory for each server
 - Manages start, stop, restart, status, logs, and server settings
+- Checks GitHub Releases for toolkit updates and installs them on request
 - Reuses MCID templates for the whitelist and operator list
 - Supports Playit and server resource packs
 - Uses Windows file dialogs and a Windows IME-friendly MOTD editor when available
@@ -46,7 +47,7 @@ Install a specific release:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | \
-  bash -s -- --version v1.0.0
+  bash -s -- --version v1.1.1
 ```
 
 The installer downloads the release archive, verifies its SHA-256 checksum, and installs the program under `~/.local/share/mcserver-compose-kit`. It also adds a managed PATH block for `~/.local/bin` to `~/.bashrc`.
@@ -96,6 +97,8 @@ Check the installed toolkit version with:
 ```bash
 mcserver-kit --version
 ```
+
+The dashboard checks for a newer GitHub Release at most once every 24 hours. A failed or offline check does not prevent the dashboard from opening.
 
 Running `mcserver-kit` without arguments in a non-interactive environment prints help instead of opening the dashboard.
 
@@ -256,7 +259,19 @@ Delete configuration and MCID templates while keeping installed program files an
 mcserver-kit reset
 ```
 
-Update by running the installer again. Existing user configuration is kept.
+Check for an update without installing it:
+
+```bash
+mcserver-kit update check
+```
+
+Check again and install the latest release after confirmation:
+
+```bash
+mcserver-kit update
+```
+
+The dashboard uses a 24-hour cache for automatic checks. The explicit commands always request the current Latest Release. Existing user configuration and MCID templates are kept during an update.
 
 Remove the program but keep user configuration:
 
