@@ -13,6 +13,7 @@
 - 保存されたMinecraftバージョンを検出し、対応するJavaイメージを提案
 - サーバーごとに`compose.yaml`、`.env`、`server.env`、`data/`を作成
 - 起動、停止、再起動、状態確認、ログ表示、Minecraft設定を一元管理
+- GitHub Releasesでツール本体の更新を確認し、確認後にインストール
 - ホワイトリストとOPでMCIDテンプレートを再利用
 - Playitとサーバーリソースパックに対応
 - 利用可能な場合はWindowsのファイル選択画面と、日本語を入力しやすいMOTD編集画面を使用
@@ -46,7 +47,7 @@ curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/ma
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | \
-  bash -s -- --version v1.0.0
+  bash -s -- --version v1.1.1
 ```
 
 インストーラーはリリースの圧縮ファイルを取得し、SHA-256を検証して`~/.local/share/mcserver-compose-kit`へ配置します。また、`~/.local/bin`用のPATH設定を管理ブロックとして`~/.bashrc`へ追加します。
@@ -97,6 +98,8 @@ mcserver-kit
 ```bash
 mcserver-kit --version
 ```
+
+ホーム画面では、GitHubに新しいReleaseがあるか24時間に1回まで自動確認します。オフラインや確認失敗時でもホーム画面の起動は妨げません。
 
 パイプやCIなどの非対話環境で引数なし実行した場合は、ホーム画面ではなくヘルプを表示します。
 
@@ -257,7 +260,19 @@ mcserver-kit --lang ja --help
 mcserver-kit reset
 ```
 
-更新はインストーラーをもう一度実行します。既存のユーザー設定は保持されます。
+インストールせず更新の有無だけを確認します。
+
+```bash
+mcserver-kit update check
+```
+
+もう一度確認し、確認メッセージの後で最新Releaseをインストールします。
+
+```bash
+mcserver-kit update
+```
+
+ホーム画面の自動確認は24時間キャッシュを使います。明示的なコマンドはその時点のLatest Releaseを取得します。更新時も既存のユーザー設定とMCIDテンプレートは保持されます。
 
 設定を残して本体だけを削除する場合：
 
