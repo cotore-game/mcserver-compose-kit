@@ -476,6 +476,51 @@ CURL
   assert_equal 'present' "$(grep -q 'Update available: v1.1.1' "$whiptail_log" && printf present)" 'the dashboard announces a newer cached release'
 }
 
+test_home_screen_transition_after_current_update() {
+  local temp_dir="$1" repo_version
+  local config_file="${temp_dir}/home-transition/config.yml"
+  local fake_bin="${temp_dir}/home-transition/bin"
+  local event_log="${temp_dir}/home-transition/events.log"
+  local menu_count="${temp_dir}/home-transition/menu-count"
+  local output
+  repo_version="$(head -n 1 "${REPO_ROOT}/VERSION")"
+  mkdir -p "$fake_bin"
+  cat >"$config_file" <<CONFIG
+paths:
+  server_root: "${temp_dir}/home-transition/servers"
+CONFIG
+  cat >"${fake_bin}/whiptail" <<'WHIPTAIL'
+#!/usr/bin/env bash
+printf 'menu\n' >>"$MCSERVER_KIT_TEST_EVENTS"
+if [[ ! -f "$MCSERVER_KIT_TEST_MENU_COUNT" ]]; then
+  : >"$MCSERVER_KIT_TEST_MENU_COUNT"
+  printf 'update' >&2
+else
+  printf 'exit' >&2
+fi
+WHIPTAIL
+  cat >"${fake_bin}/clear" <<'CLEAR'
+#!/usr/bin/env bash
+printf 'clear\n' >>"$MCSERVER_KIT_TEST_EVENTS"
+CLEAR
+  cat >"${fake_bin}/curl" <<'CURL'
+#!/usr/bin/env bash
+printf '%s' "$MCSERVER_KIT_TEST_LATEST_URL"
+CURL
+  chmod +x "${fake_bin}/whiptail" "${fake_bin}/clear" "${fake_bin}/curl"
+
+  output="$(printf '\n' | PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+    MCSERVER_KIT_CONFIG="$config_file" MCSERVER_KIT_TUI_TEST=true \
+    MCSERVER_KIT_CURRENT_VERSION="$repo_version" \
+    MCSERVER_KIT_TEST_LATEST_URL="https://github.com/cotore-game/mcserver-compose-kit/releases/tag/v${repo_version}" \
+    MCSERVER_KIT_UPDATE_CACHE_DIR="${temp_dir}/home-transition/cache" \
+    MCSERVER_KIT_TEST_EVENTS="$event_log" MCSERVER_KIT_TEST_MENU_COUNT="$menu_count" \
+    bash "${REPO_ROOT}/mcserver-kit" home)"
+  assert_equal 'present' "$(grep -Fq "v${repo_version} is up to date." <<<"$output" && printf present)" 'up-to-date status is shown before returning to the home menu'
+  assert_equal 'present' "$(grep -Fq 'Press Enter to return' <<<"$output" && printf present)" 'up-to-date status waits for Enter instead of restarting the TUI'
+  assert_equal $'menu\nclear\nclear\nmenu' "$(<"$event_log")" 'terminal output is cleared before the next TUI menu'
+}
+
 test_setup_command() {
   local temp_dir="$1"
   local config_file="${temp_dir}/setup/config.yml"
@@ -804,6 +849,7 @@ main() {
   test_server_property_editor "$TEST_TEMP_DIR"
   test_property_import_and_explorer "$TEST_TEMP_DIR"
   test_home_dashboard "$TEST_TEMP_DIR"
+  test_home_screen_transition_after_current_update "$TEST_TEMP_DIR"
 
   printf 'PASS: %d specification tests, %d skipped\n' "$tests_run" "$tests_skipped"
 }

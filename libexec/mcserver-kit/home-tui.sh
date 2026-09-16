@@ -116,6 +116,9 @@ dashboard_text() {
 pause_for_enter() {
   printf '\n%s' "$(tr home.press_enter)"
   read -r _ || true
+  # whiptail restores the underlying terminal screen when a dialog closes.
+  # Do not leave output from the previous CLI action beneath the next menu.
+  clear
 }
 
 run_and_show() {
@@ -240,7 +243,7 @@ diagnostics() {
 }
 
 main() {
-  local root choice
+  local root choice installed_version
   command -v whiptail >/dev/null 2>&1 || {
     tr tui.missing >&2
     exit 1
@@ -276,7 +279,11 @@ main() {
       update)
         clear
         if "${SCRIPT_DIR}/update.sh"; then
-          exec "${ROOT_DIR}/mcserver-kit" home
+          installed_version="$(head -n 1 "${ROOT_DIR}/VERSION" 2>/dev/null || printf unknown)"
+          if [[ "$installed_version" != "$VERSION" ]]; then
+            clear
+            exec "${ROOT_DIR}/mcserver-kit" home
+          fi
         fi
         pause_for_enter
         ;;
