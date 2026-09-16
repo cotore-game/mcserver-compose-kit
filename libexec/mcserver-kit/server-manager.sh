@@ -6,6 +6,8 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${MCSERVER_KIT_CONFIG:-${HOME}/.config/mcserver-compose-kit/config.yml}"
 CONFIG_VALUE="${SCRIPT_DIR}/config-value.py"
+CONFIG_TOOL="${SCRIPT_DIR}/server-config.py"
+WINDOWS_DIALOG="${SCRIPT_DIR}/windows-dialog.ps1"
 
 # shellcheck source=libexec/mcserver-kit/i18n.sh
 source "${SCRIPT_DIR}/i18n.sh"
@@ -82,6 +84,59 @@ compose_in() {
   )
 }
 
+require_stopped() {
+  local directory="$1" running
+  running="$(compose_in "$directory" ps --status running --services)" || die "$(tr server.status_failed)"
+  [[ -z "$running" ]] || die "$(tr server.stop_before_import)"
+}
+
+choose_properties_file() {
+  local enabled dialog_path encoded selected
+  enabled="$(python3 "$CONFIG_VALUE" get "$CONFIG_FILE" ui windows_dialogs 2>/dev/null || printf true)"
+  if [[ "$enabled" == true ]] && command -v wslpath >/dev/null 2>&1 &&
+    [[ -x /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe && -f "$WINDOWS_DIALOG" ]]; then
+    dialog_path="$(wslpath -w "$WINDOWS_DIALOG")"
+    encoded="$(/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe \
+      -NoProfile -ExecutionPolicy Bypass -File "$dialog_path" -Mode SelectProperties 2>/dev/null)" || return 1
+    encoded="${encoded//$'\r'/}"
+    selected="$(printf '%s' "$encoded" | base64 --decode)" || return 1
+    wslpath -u "$selected"
+    return
+  fi
+  [[ -t 0 ]] || die "$(tr server.import_usage)"
+  read -r -p "$(tr server.import_path_prompt)" selected
+  [[ -n "$selected" ]] || return 1
+  printf '%s' "$selected"
+}
+
+import_properties() {
+  local directory="$1" source="${2-}" backup
+  require_stopped "$directory"
+  if [[ -z "$source" ]]; then
+    source="$(choose_properties_file)" || return 0
+  fi
+  [[ -f "$source" ]] || die "$(tr server.import_source_missing "$source")"
+  python3 "$CONFIG_TOOL" validate-properties "$source" || die "$(tr server.import_failed)"
+  python3 "$CONFIG_TOOL" migrate "$directory" || die "$(tr server.import_failed)"
+  backup="$(python3 "$CONFIG_TOOL" import-properties "$directory" "$source")" || die "$(tr server.import_failed)"
+  compose_in "$directory" config --quiet || die "$(tr properties.compose_invalid)"
+  [[ -z "$backup" ]] || printf '%s\n' "$(tr server.import_backup "$backup")"
+  printf '%s\n' "$(tr server.import_done "${directory}/data/server.properties")"
+}
+
+open_folder() {
+  local directory="$1" part="${2:-data}" target windows_path
+  case "$part" in
+    data) target="${directory}/data" ;;
+    server) target="$directory" ;;
+    *) die "$(tr server.open_usage)" ;;
+  esac
+  [[ -d "$target" ]] || die "$(tr server.open_missing "$target")"
+  command -v wslpath >/dev/null 2>&1 && command -v explorer.exe >/dev/null 2>&1 || die "$(tr server.explorer_unavailable)"
+  windows_path="$(wslpath -w "$target")" || die "$(tr server.explorer_unavailable)"
+  explorer.exe "$windows_path"
+}
+
 manage_server() {
   local id="${1-}"
   local action="${2-}"
@@ -123,6 +178,14 @@ manage_server() {
       ;;
     properties)
       exec "${SCRIPT_DIR}/server-properties-tui.sh" "$id" "$directory"
+      ;;
+    import-properties)
+      [[ $# -le 1 ]] || die "$(tr server.import_usage)"
+      import_properties "$directory" "${1-}"
+      ;;
+    open)
+      [[ $# -le 1 ]] || die "$(tr server.open_usage)"
+      open_folder "$directory" "${1:-data}"
       ;;
     *)
       die "$(tr server.unknown_action "$action")"

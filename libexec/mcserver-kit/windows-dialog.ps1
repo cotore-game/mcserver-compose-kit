@@ -1,6 +1,6 @@
 ﻿param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('SelectWorld', 'InputMotd', 'Check')]
+    [ValidateSet('SelectWorld', 'SelectProperties', 'InputMotd', 'Check')]
     [string]$Mode,
 
     [string]$DefaultValue = ''
@@ -55,6 +55,18 @@ if ($Mode -eq 'SelectWorld') {
         exit 1
     }
     Write-Utf8Base64 $folderDialog.SelectedPath
+    exit 0
+}
+
+if ($Mode -eq 'SelectProperties') {
+    $dialog = New-Object System.Windows.Forms.OpenFileDialog
+    $dialog.Title = 'Select server.properties / server.propertiesを選択'
+    $dialog.Filter = 'server.properties|server.properties|All files (*.*)|*.*'
+    $dialog.CheckFileExists = $true
+    if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+        exit 1
+    }
+    Write-Utf8Base64 $dialog.FileName
     exit 0
 }
 

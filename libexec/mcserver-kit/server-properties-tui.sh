@@ -7,8 +7,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_ID="${1-}"
 SERVER_DIR="${2-}"
 SERVER_ENV="${SERVER_DIR}/server.env"
+SERVER_PROPERTIES="${SERVER_DIR}/data/server.properties"
 CONFIG_TOOL="${SCRIPT_DIR}/server-config.py"
 changed=false
+manual_properties=false
 
 # shellcheck source=libexec/mcserver-kit/i18n.sh
 source "${SCRIPT_DIR}/i18n.sh"
@@ -40,11 +42,27 @@ die() {
 }
 
 setting_get() {
-  python3 "$CONFIG_TOOL" get "$SERVER_ENV" "$1" "$2"
+  if [[ "$manual_properties" == true ]]; then
+    case "$1" in
+      WHITELIST | EXISTING_WHITELIST_FILE | OPS | EXISTING_OPS_FILE)
+        python3 "$CONFIG_TOOL" get "$SERVER_ENV" "$1" "$2" ;;
+      *) python3 "$CONFIG_TOOL" property-get "$SERVER_PROPERTIES" "$1" "$2" ;;
+    esac
+  else
+    python3 "$CONFIG_TOOL" get "$SERVER_ENV" "$1" "$2"
+  fi
 }
 
 setting_set() {
-  python3 "$CONFIG_TOOL" set "$SERVER_ENV" "$1" "$2"
+  if [[ "$manual_properties" == true ]]; then
+    case "$1" in
+      WHITELIST | EXISTING_WHITELIST_FILE | OPS | EXISTING_OPS_FILE)
+        python3 "$CONFIG_TOOL" set "$SERVER_ENV" "$1" "$2" ;;
+      *) python3 "$CONFIG_TOOL" property-set "$SERVER_PROPERTIES" "$1" "$2" ;;
+    esac
+  else
+    python3 "$CONFIG_TOOL" set "$SERVER_ENV" "$1" "$2"
+  fi
   changed=true
 }
 
@@ -212,6 +230,15 @@ main() {
     whiptail --yesno "$(tr properties.migration_prompt)" 11 76 || return
   fi
   python3 "$CONFIG_TOOL" migrate "$SERVER_DIR"
+  if [[ "$(python3 "$CONFIG_TOOL" get "$SERVER_ENV" OVERRIDE_SERVER_PROPERTIES true)" == false ]]; then
+    [[ -f "$SERVER_PROPERTIES" ]] || die "$(tr properties.file_missing)"
+    local running
+    running="$(cd "$SERVER_DIR" && docker compose ps --status running --services)" || die "$(tr server.status_failed)"
+    if [[ -n "$running" ]]; then
+      die "$(tr properties.stop_first "$SERVER_ID")"
+    fi
+    manual_properties=true
+  fi
   (cd "$SERVER_DIR" && docker compose config --quiet) || die "$(tr properties.compose_invalid)"
 
   while true; do

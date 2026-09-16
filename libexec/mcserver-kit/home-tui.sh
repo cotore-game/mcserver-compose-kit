@@ -131,15 +131,18 @@ run_and_show() {
 }
 
 server_action_menu() {
-  local id="$1" directory="$2" choice
+  local id="$1" directory="$2" choice output
   while true; do
-    choice="$(whiptail --title "$id" --menu "$(tr home.server_status "$(server_status "$directory")")" 21 78 11 \
+    choice="$(whiptail --title "$id" --menu "$(tr home.server_status "$(server_status "$directory")")" 23 78 13 \
       start "$(tr home.start)" \
       stop "$(tr home.stop)" \
       restart "$(tr home.restart)" \
       status "$(tr home.status)" \
       logs "$(tr home.logs)" \
       properties "$(tr home.properties)" \
+      import-properties "$(tr home.import_properties)" \
+      open-data "$(tr home.open_data)" \
+      open-server "$(tr home.open_server)" \
       down "$(tr home.down)" \
       back "$(tr tui.back)" \
       3>&1 1>&2 2>&3)" || return
@@ -154,6 +157,23 @@ server_action_menu() {
         ;;
       properties)
         "${SCRIPT_DIR}/server-manager.sh" server "$id" properties || true
+        ;;
+      import-properties)
+        if whiptail --yesno "$(tr home.import_confirm "$id")" 12 76; then
+          clear
+          "${SCRIPT_DIR}/server-manager.sh" server "$id" import-properties || true
+          pause_for_enter
+        fi
+        ;;
+      open-data | open-server)
+        new_temp_file output
+        if [[ "$choice" == open-data ]]; then
+          "${SCRIPT_DIR}/server-manager.sh" server "$id" open data >"$output" 2>&1 ||
+            whiptail --title "$(tr common.error)" --textbox "$output" 14 78
+        else
+          "${SCRIPT_DIR}/server-manager.sh" server "$id" open server >"$output" 2>&1 ||
+            whiptail --title "$(tr common.error)" --textbox "$output" 14 78
+        fi
         ;;
       down)
         if whiptail --yesno "$(tr home.down_confirm "$id")" 10 72; then
