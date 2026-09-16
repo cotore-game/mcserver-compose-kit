@@ -132,7 +132,9 @@ open_folder() {
     *) die "$(tr server.open_usage)" ;;
   esac
   [[ -d "$target" ]] || die "$(tr server.open_missing "$target")"
-  command -v wslpath >/dev/null 2>&1 && command -v explorer.exe >/dev/null 2>&1 || die "$(tr server.explorer_unavailable)"
+  if ! command -v wslpath >/dev/null 2>&1 || ! command -v explorer.exe >/dev/null 2>&1; then
+    die "$(tr server.explorer_unavailable)"
+  fi
   windows_path="$(wslpath -w "$target")" || die "$(tr server.explorer_unavailable)"
   explorer.exe "$windows_path"
 }
