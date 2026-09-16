@@ -141,12 +141,45 @@ def validate_properties_source(source: Path) -> None:
         raise ValueError(f"Not a file: {source}")
     if source.name != "server.properties":
         raise ValueError("Select a file named server.properties")
-    if not read_properties(source):
+    if not parse_import_properties(source):
         raise ValueError("The selected file has no property entries")
+
+
+def parse_import_properties(source: Path) -> dict[str, str]:
+    """Read the simple key=value format emitted by Minecraft without dropping entries."""
+    values: dict[str, str] = {}
+    for number, line in enumerate(source.read_text(encoding="utf-8-sig").splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", "!")):
+            continue
+        if "=" not in line:
+            raise ValueError(f"Line {number}: expected key=value")
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", key):
+            raise ValueError(f"Line {number}: unsupported property key: {key}")
+        if "\\" in key or "\\" in value:
+            raise ValueError(f"Line {number}: escaped properties are not supported")
+        values[key] = value
+    if values.get("level-name", "world") != "world":
+        raise ValueError("level-name must be world for this server layout")
+    if values.get("server-port", "25565") != "25565":
+        raise ValueError("server-port must be 25565 for this server layout")
+    return values
 
 
 def import_properties(server_dir: Path, source: Path) -> Path | None:
     validate_properties_source(source)
+    imported = parse_import_properties(source)
+    env_path = server_dir / "server.env"
+    values = read_env(env_path)
+    for env_key, property_key in PROPERTY_KEYS.items():
+        if property_key in imported:
+            values[env_key] = imported[property_key]
+    known = set(PROPERTY_KEYS.values()) | {"level-name", "server-port"}
+    extras = [f"{key}={value}" for key, value in imported.items() if key not in known]
+    values["CUSTOM_SERVER_PROPERTIES"] = "\n".join(extras)
+    values["OVERRIDE_SERVER_PROPERTIES"] = "true"
 
     destination = server_dir / "data" / "server.properties"
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -167,9 +200,6 @@ def import_properties(server_dir: Path, source: Path) -> Path | None:
         with os.fdopen(descriptor, "wb") as output, source.open("rb") as input_file:
             shutil.copyfileobj(input_file, output)
         os.chmod(temporary_name, 0o644)
-        env_path = server_dir / "server.env"
-        values = read_env(env_path)
-        values["OVERRIDE_SERVER_PROPERTIES"] = "false"
         write_env(env_path, values)
         os.replace(temporary_name, destination)
     finally:

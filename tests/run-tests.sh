@@ -755,6 +755,7 @@ PROPERTIES
 motd=Distributed MOTD
 difficulty=hard
 custom-setting=preserve-me
+plugin.option=enabled
 PROPERTIES
   cat >"${fake_bin}/docker" <<'DOCKER'
 #!/usr/bin/env bash
@@ -778,6 +779,16 @@ EXPLORER
       bash "${REPO_ROOT}/mcserver-kit" server alpha import-properties "${source_dir}/invalid.properties"
   assert_equal 'absent' "$(! grep -q '^MAX_PLAYERS=' "${server_dir}/server.env" && printf absent)" 'invalid import does not migrate server settings'
 
+  mkdir -p "${source_dir}/incompatible"
+  cat >"${source_dir}/incompatible/server.properties" <<'PROPERTIES'
+motd=Should not be imported
+server-port=25566
+PROPERTIES
+  assert_fails 'an incompatible server port is rejected before migration' \
+    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+      bash "${REPO_ROOT}/mcserver-kit" server alpha import-properties "${source_dir}/incompatible/server.properties"
+  assert_equal 'Old MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" MOTD)" 'rejected import leaves the environment unchanged'
+
   assert_fails 'import refuses to replace properties while the server is running' \
     env PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
       MCSERVER_KIT_TEST_RUNNING=true bash "${REPO_ROOT}/mcserver-kit" server alpha import-properties "${source_dir}/server.properties"
@@ -786,16 +797,16 @@ EXPLORER
   output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
     bash "${REPO_ROOT}/mcserver-kit" server alpha import-properties "${source_dir}/server.properties")"
   assert_equal 'Distributed MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-get "${server_dir}/data/server.properties" MOTD)" 'import copies the supplied server.properties'
-  assert_equal 'false' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" OVERRIDE_SERVER_PROPERTIES)" 'import disables property overrides for this server'
+  assert_equal 'true' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" OVERRIDE_SERVER_PROPERTIES)" 'import keeps server.env authoritative'
+  assert_equal 'Distributed MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" MOTD)" 'import converts managed properties to environment settings'
+  assert_equal 'hard' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" DIFFICULTY)" 'import updates the difficulty'
+  assert_equal $'custom-setting=preserve-me\nplugin.option=enabled' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" CUSTOM_SERVER_PROPERTIES)" 'import converts extra properties to CUSTOM_SERVER_PROPERTIES'
   assert_equal 'present' "$(grep -q 'custom-setting=preserve-me' "${server_dir}/data/server.properties" && printf present)" 'import keeps custom settings'
   assert_equal 'present' "$(grep -q 'motd=Old MOTD' "${server_dir}"/data/server.properties.mcserver-kit.*.bak && printf present)" 'import backs up the previous properties'
   assert_equal 'present' "$(grep -q 'Previous server.properties backup' <<<"$output" && printf present)" 'import reports the backup location'
 
   python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" migrate "$server_dir"
-  assert_equal 'false' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" OVERRIDE_SERVER_PROPERTIES)" 'later migration preserves manual property mode'
-  python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-set "${server_dir}/data/server.properties" MOTD 'Edited MOTD'
-  assert_equal 'Edited MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-get "${server_dir}/data/server.properties" MOTD)" 'manual property editor writes the data file'
-  assert_equal 'present' "$(grep -q 'custom-setting=preserve-me' "${server_dir}/data/server.properties" && printf present)" 'manual property editor preserves unrelated entries'
+  assert_equal 'true' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" OVERRIDE_SERVER_PROPERTIES)" 'later migration preserves environment property mode'
 
   cat >"${fake_bin}/whiptail" <<'WHIPTAIL'
 #!/usr/bin/env bash
@@ -817,8 +828,8 @@ WHIPTAIL
   PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
     MCSERVER_KIT_TEST_WHIPTAIL_STATE="${temp_dir}/property-import/whiptail-state" \
     bash "${REPO_ROOT}/libexec/mcserver-kit/server-properties-tui.sh" alpha "$server_dir" >/dev/null
-  assert_equal 'TUI MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-get "${server_dir}/data/server.properties" MOTD)" 'the TUI edits imported properties directly'
-  assert_equal 'Old MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" MOTD)" 'manual property edits do not rewrite the old environment value'
+  assert_equal 'TUI MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" MOTD)" 'the TUI edits the authoritative environment value'
+  assert_equal 'Distributed MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-get "${server_dir}/data/server.properties" MOTD)" 'the data file changes only when the container applies server.env'
 
   PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
     MCSERVER_KIT_TEST_EXPLORER_LOG="${temp_dir}/property-import/explorer.log" \
