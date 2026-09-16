@@ -143,7 +143,6 @@ server_action_menu() {
       status "$(tr home.status)" \
       logs "$(tr home.logs)" \
       properties "$(tr home.properties)" \
-      import-properties "$(tr home.import_properties)" \
       open-data "$(tr home.open_data)" \
       open-server "$(tr home.open_server)" \
       down "$(tr home.down)" \
@@ -160,13 +159,6 @@ server_action_menu() {
         ;;
       properties)
         "${SCRIPT_DIR}/server-manager.sh" server "$id" properties || true
-        ;;
-      import-properties)
-        if whiptail --yesno "$(tr home.import_confirm "$id")" 12 76; then
-          clear
-          "${SCRIPT_DIR}/server-manager.sh" server "$id" import-properties || true
-          pause_for_enter
-        fi
         ;;
       open-data | open-server)
         new_temp_file output

@@ -220,6 +220,25 @@ finish() {
   fi
 }
 
+import_properties() {
+  local output result
+  whiptail --yesno "$(tr home.import_confirm "$SERVER_ID")" 12 76 || return
+  output="$(mktemp)"
+  if "${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" import-properties >"$output" 2>&1; then
+    if [[ -s "$output" ]]; then
+      whiptail --title "$(tr properties.import)" --textbox "$output" 16 82
+      manual_properties=false
+      changed=true
+    fi
+  else
+    result=$?
+    whiptail --title "$(tr common.error)" --textbox "$output" 16 82
+    rm -f -- "$output"
+    return "$result"
+  fi
+  rm -f -- "$output"
+}
+
 main() {
   local selected
   local items
@@ -260,11 +279,13 @@ main() {
       SIMULATION_DISTANCE "$(menu_item "$(tr properties.simulation_distance)" "$(setting_get SIMULATION_DISTANCE 10)")"
       __more "$(tr properties.more_settings)"
       __resource "$(tr properties.resource_pack_settings)"
+      __import "$(tr properties.import)"
       __exit "$(tr properties.exit)"
     )
     selected="$(whiptail --title "${SERVER_ID}" --menu "$(tr properties.choose)" 25 94 18 "${items[@]}" 3>&1 1>&2 2>&3)" || break
     case "$selected" in
       __exit) break ;;
+      __import) import_properties || true ;;
       __more)
         selected="$(whiptail --title "${SERVER_ID}" --menu "$(tr properties.more_settings)" 24 90 15 \
           FORCE_GAMEMODE "$(menu_item "$(tr properties.force_gamemode)" "$(setting_get FORCE_GAMEMODE false)")" \

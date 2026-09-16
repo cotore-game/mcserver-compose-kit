@@ -189,7 +189,7 @@ MOTD、難易度、ゲームモード、最大人数、オンラインモード�
 
 通常、ツールが管理する設定の正本は各サーバーの`server.env`です。Docker Composeが値を`itzg/minecraft-server`へ渡し、コンテナ起動時に`server.properties`へ反映します。
 
-配布された`server.properties`を使う場合は、サーバーを停止してホーム画面の「server.propertiesをインポート」を選ぶか、`mcserver-kit server <server-id> import-properties /path/to/server.properties`を実行します。Windowsダイアログを有効にしているWSL環境では、ホーム画面からWindowsのファイル選択画面を開けます。既存ファイルは置換前にバックアップされます。インポートしたサーバーだけ、プロパティ設定の正本が`data/server.properties`に切り替わり、設定画面もそのファイルを読み書きします。ホワイトリストとOPのメンバー一覧は引き続き`server.env`で管理します。起動中にファイルを直接編集しないでください。
+配布された`server.properties`を使う場合は、サーバーを停止して「サーバー設定 → server.propertiesをインポート」を選ぶか、`mcserver-kit server <server-id> import-properties /path/to/server.properties`を実行します。Windowsダイアログを有効にしているWSL環境では、設定画面からWindowsのファイル選択画面を開けます。既存のデータファイルは置換前にバックアップします。対応する項目を`server.env`へ取り込み、その他のキーは`CUSTOM_SERVER_PROPERTIES`へ保存します。設定の正本は引き続き`server.env`で、元ファイルも`data/server.properties`へコピーします。ワールド名やポートがこのサーバー構成と異なる場合、または未対応の書式の場合は黙って変更せずエラーにします。サーバー起動中にファイルを直接編集しないでください。
 
 ホーム画面からサーバーフォルダ、または永続データの`data/`をWindowsのExplorerで開けます。コマンドでは`mcserver-kit server <server-id> open server`または`open data`です。WSLとExplorerの連携が必要です。
 
