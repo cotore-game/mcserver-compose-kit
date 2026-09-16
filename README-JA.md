@@ -170,6 +170,9 @@ mcserver-kit server <server-id> logs
 mcserver-kit server <server-id> logs --no-follow
 mcserver-kit server <server-id> down
 mcserver-kit server <server-id> properties
+mcserver-kit server <server-id> import-properties /path/to/server.properties
+mcserver-kit server <server-id> open data
+mcserver-kit server <server-id> open server
 ```
 
 `stop`と`shutdown`はコンテナを削除せず停止します。`down`はコンテナとネットワークを削除します。いずれもサーバーの`data/`は削除しません。
@@ -184,7 +187,11 @@ mcserver-kit server <server-id> properties
 
 MOTD、難易度、ゲームモード、最大人数、オンラインモード、ホワイトリスト、OP、飛行、コマンドブロック、PvP、描画・シミュレーション距離、スポーン保護、ネザー、Mob/NPC生成、リソースパックなどを編集できます。
 
-ツールが管理する設定の正本は各サーバーの`server.env`です。Docker Composeが値を`itzg/minecraft-server`へ渡し、コンテナ起動時に`server.properties`へ反映します。
+通常、ツールが管理する設定の正本は各サーバーの`server.env`です。Docker Composeが値を`itzg/minecraft-server`へ渡し、コンテナ起動時に`server.properties`へ反映します。
+
+配布された`server.properties`を使う場合は、サーバーを停止してホーム画面の「server.propertiesをインポート」を選ぶか、`mcserver-kit server <server-id> import-properties /path/to/server.properties`を実行します。Windowsダイアログを有効にしているWSL環境では、ホーム画面からWindowsのファイル選択画面を開けます。既存ファイルは置換前にバックアップされます。インポートしたサーバーだけ、プロパティ設定の正本が`data/server.properties`に切り替わり、設定画面もそのファイルを読み書きします。ホワイトリストとOPのメンバー一覧は引き続き`server.env`で管理します。起動中にファイルを直接編集しないでください。
+
+ホーム画面からサーバーフォルダ、または永続データの`data/`をWindowsのExplorerで開けます。コマンドでは`mcserver-kit server <server-id> open server`または`open data`です。WSLとExplorerの連携が必要です。
 
 古い形式のサーバーを初めて開く場合は、移行前に確認画面を表示します。元のComposeは`compose.yaml.mcserver-kit.bak`として保存します。
 

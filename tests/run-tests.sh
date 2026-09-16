@@ -379,7 +379,9 @@ test_local_installation() {
   local install_log="${temp_dir}/install/install.log"
   local shell_rc="${temp_dir}/install/bashrc"
   local update_cache="${temp_dir}/install/cache"
-  local installed_help
+  local installed_help repo_version
+
+  repo_version="$(head -n 1 "${REPO_ROOT}/VERSION")"
 
   mkdir -p "$fake_bin"
   ln -s /usr/bin/true "${fake_bin}/unzip"
@@ -394,7 +396,7 @@ test_local_installation() {
   assert_equal 'present' "$([[ -x "${bin_dir}/mcserver-kit" ]] && printf present)" 'the installer creates the launcher'
   installed_help="$("${bin_dir}/mcserver-kit" --help)"
   assert_equal 'present' "$(grep -q 'mcserver-kit setup' <<<"$installed_help" && printf present)" 'the installed launcher exposes subcommand help'
-  assert_equal '1.1.1' "$("${bin_dir}/mcserver-kit" --version | awk '{print $2}')" 'the installed launcher reports its version'
+  assert_equal "$repo_version" "$("${bin_dir}/mcserver-kit" --version | awk '{print $2}')" 'the installed launcher reports its version'
   assert_equal 'present' "$([[ -f "${config_dir}/config.yml" ]] && printf present)" 'the installer creates the initial config'
   assert_equal 'present' "$([[ -f "${install_dir}/libexec/mcserver-kit/windows-dialog.ps1" ]] && printf present)" 'the installer includes the Windows dialog helper'
   assert_equal 'present' "$([[ -x "${install_dir}/libexec/mcserver-kit/lang.sh" ]] && printf present)" 'the installer includes the language command'
@@ -408,7 +410,7 @@ test_local_installation() {
   assert_equal 'en' "$(cat "${config_dir}/language")" 'the installer defaults to English'
   assert_equal '1' "$(grep -Fxc '# >>> mcserver-kit PATH >>>' "$shell_rc")" 'the installer registers one managed PATH block'
   assert_equal 'present' "$(grep -q 'mcserver-kit setup' "$install_log" && printf present)" 'the installer instructs the user to run setup'
-  assert_equal 'present' "$(grep -q 'mcserver-kit 1.1.1' "$install_log" && printf present)" 'the installer shows the installed version'
+  assert_equal 'present' "$(grep -Fq "mcserver-kit ${repo_version}" "$install_log" && printf present)" 'the installer shows the installed version'
   assert_equal 'absent' "$(! grep -q '初回セットアップを開始' "$install_log" && printf absent)" 'the installer does not start setup automatically'
 
   printf '\n# preserve-on-update\n' >>"${config_dir}/config.yml"
@@ -674,6 +676,111 @@ WHIPTAIL
   assert_equal 'Unified MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "$server_env" MOTD)" 'the properties TUI updates unified settings'
 }
 
+test_property_import_and_explorer() {
+  local temp_dir="$1" root
+  root="${temp_dir}/property-import/servers"
+  local config_file="${temp_dir}/property-import/config.yml"
+  local fake_bin="${temp_dir}/property-import/bin"
+  local source_dir="${temp_dir}/property-import/distribution"
+  local server_dir="${root}/alpha" output
+  mkdir -p "${server_dir}/data" "$fake_bin" "$source_dir"
+  cat >"$config_file" <<CONFIG
+paths:
+  server_root: "$root"
+CONFIG
+  cat >"${server_dir}/compose.yaml" <<'COMPOSE'
+services:
+  minecraft:
+    image: itzg/minecraft-server:java21
+    env_file:
+      - server.env
+    volumes:
+      - ./data:/data
+COMPOSE
+  cat >"${server_dir}/server.env" <<'ENV'
+MOTD="Old MOTD"
+DIFFICULTY="easy"
+ENV
+  cat >"${server_dir}/data/server.properties" <<'PROPERTIES'
+# original
+motd=Old MOTD
+PROPERTIES
+  cat >"${source_dir}/server.properties" <<'PROPERTIES'
+# distributed settings
+motd=Distributed MOTD
+difficulty=hard
+custom-setting=preserve-me
+PROPERTIES
+  cat >"${fake_bin}/docker" <<'DOCKER'
+#!/usr/bin/env bash
+if [[ "$*" == 'compose ps --status running --services' && "${MCSERVER_KIT_TEST_RUNNING:-false}" == true ]]; then
+  printf 'minecraft\n'
+fi
+DOCKER
+  cat >"${fake_bin}/wslpath" <<'WSLPATH'
+#!/usr/bin/env bash
+printf 'WIN:%s\n' "$2"
+WSLPATH
+  cat >"${fake_bin}/explorer.exe" <<'EXPLORER'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >"$MCSERVER_KIT_TEST_EXPLORER_LOG"
+EXPLORER
+  chmod +x "${fake_bin}/docker" "${fake_bin}/wslpath" "${fake_bin}/explorer.exe"
+
+  : >"${source_dir}/invalid.properties"
+  assert_fails 'invalid property input is rejected before migration' \
+    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+      bash "${REPO_ROOT}/mcserver-kit" server alpha import-properties "${source_dir}/invalid.properties"
+  assert_equal 'absent' "$(! grep -q '^MAX_PLAYERS=' "${server_dir}/server.env" && printf absent)" 'invalid import does not migrate server settings'
+
+  assert_fails 'import refuses to replace properties while the server is running' \
+    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+      MCSERVER_KIT_TEST_RUNNING=true bash "${REPO_ROOT}/mcserver-kit" server alpha import-properties "${source_dir}/server.properties"
+  assert_equal 'Old MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-get "${server_dir}/data/server.properties" MOTD)" 'running server keeps the original properties'
+
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha import-properties "${source_dir}/server.properties")"
+  assert_equal 'Distributed MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-get "${server_dir}/data/server.properties" MOTD)" 'import copies the supplied server.properties'
+  assert_equal 'false' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" OVERRIDE_SERVER_PROPERTIES)" 'import disables property overrides for this server'
+  assert_equal 'present' "$(grep -q 'custom-setting=preserve-me' "${server_dir}/data/server.properties" && printf present)" 'import keeps custom settings'
+  assert_equal 'present' "$(grep -q 'motd=Old MOTD' "${server_dir}"/data/server.properties.mcserver-kit.*.bak && printf present)" 'import backs up the previous properties'
+  assert_equal 'present' "$(grep -q 'Previous server.properties backup' <<<"$output" && printf present)" 'import reports the backup location'
+
+  python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" migrate "$server_dir"
+  assert_equal 'false' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" OVERRIDE_SERVER_PROPERTIES)" 'later migration preserves manual property mode'
+  python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-set "${server_dir}/data/server.properties" MOTD 'Edited MOTD'
+  assert_equal 'Edited MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-get "${server_dir}/data/server.properties" MOTD)" 'manual property editor writes the data file'
+  assert_equal 'present' "$(grep -q 'custom-setting=preserve-me' "${server_dir}/data/server.properties" && printf present)" 'manual property editor preserves unrelated entries'
+
+  cat >"${fake_bin}/whiptail" <<'WHIPTAIL'
+#!/usr/bin/env bash
+case " $* " in
+  *' --inputbox '*) printf 'TUI MOTD' >&2 ;;
+  *' --yesno '*) exit 1 ;;
+  *' --menu '*)
+    if [[ -f "$MCSERVER_KIT_TEST_WHIPTAIL_STATE" ]]; then
+      printf '__exit' >&2
+    else
+      : >"$MCSERVER_KIT_TEST_WHIPTAIL_STATE"
+      printf 'MOTD' >&2
+    fi
+    ;;
+  *) exit 0 ;;
+esac
+WHIPTAIL
+  chmod +x "${fake_bin}/whiptail"
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+    MCSERVER_KIT_TEST_WHIPTAIL_STATE="${temp_dir}/property-import/whiptail-state" \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/server-properties-tui.sh" alpha "$server_dir" >/dev/null
+  assert_equal 'TUI MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-get "${server_dir}/data/server.properties" MOTD)" 'the TUI edits imported properties directly'
+  assert_equal 'Old MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" MOTD)" 'manual property edits do not rewrite the old environment value'
+
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_TEST_EXPLORER_LOG="${temp_dir}/property-import/explorer.log" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha open data
+  assert_equal "WIN:${server_dir}/data" "$(<"${temp_dir}/property-import/explorer.log")" 'open data passes the persistent folder to Explorer'
+}
+
 main() {
   TEST_TEMP_DIR="$(mktemp -d)"
   trap cleanup EXIT
@@ -695,6 +802,7 @@ main() {
   test_config_value_editor "$TEST_TEMP_DIR"
   test_server_management "$TEST_TEMP_DIR"
   test_server_property_editor "$TEST_TEMP_DIR"
+  test_property_import_and_explorer "$TEST_TEMP_DIR"
   test_home_dashboard "$TEST_TEMP_DIR"
 
   printf 'PASS: %d specification tests, %d skipped\n' "$tests_run" "$tests_skipped"
