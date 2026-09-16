@@ -121,7 +121,7 @@ import_properties() {
   backup="$(python3 "$CONFIG_TOOL" import-properties "$directory" "$source")" || die "$(tr server.import_failed)"
   compose_in "$directory" config --quiet || die "$(tr properties.compose_invalid)"
   [[ -z "$backup" ]] || printf '%s\n' "$(tr server.import_backup "$backup")"
-  printf '%s\n' "$(tr server.import_done "${directory}/data/server.properties")"
+  printf '%s\n' "$(tr server.import_done "${directory}/server.env")"
 }
 
 open_folder() {
