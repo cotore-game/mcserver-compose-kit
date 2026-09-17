@@ -615,6 +615,17 @@ CONFIG
   assert_equal '600' "$(stat -c '%a' "$config_file")" 'config editor preserves restricted permissions'
 }
 
+test_compose_state_parser() {
+  local parser="${REPO_ROOT}/libexec/mcserver-kit/compose-state.py"
+  assert_equal 'absent' "$(printf '\n' | python3 "$parser")" 'empty Compose output means no containers'
+  assert_equal 'absent' "$(printf '[]\n' | python3 "$parser")" 'an empty Compose array means no containers'
+  assert_equal 'running' "$(printf '[{"Service":"minecraft","State":"running"}]\n' | python3 "$parser")" 'array output detects the running server'
+  assert_equal 'stopped' "$(printf '{"Service":"minecraft","State":"exited"}\n' | python3 "$parser")" 'object output detects a retained container'
+  assert_equal 'running' "$(printf '%s\n%s\n' '{"Service":"playit","State":"running"}' '{"Service":"minecraft","State":"running"}' | python3 "$parser")" 'newline-delimited output finds the Minecraft container'
+  assert_equal 'unavailable' "$(printf '{invalid\n' | python3 "$parser")" 'malformed Compose JSON is not mistaken for no container'
+  assert_equal 'unavailable' "$(printf '123\n' | python3 "$parser")" 'unexpected Compose JSON shapes are rejected'
+}
+
 test_server_management() {
   local temp_dir="$1"
   local root="${temp_dir}/server-management/servers"
@@ -957,6 +968,7 @@ main() {
   test_setup_command "$TEST_TEMP_DIR"
   test_reset_command "$TEST_TEMP_DIR"
   test_config_value_editor "$TEST_TEMP_DIR"
+  test_compose_state_parser
   test_server_management "$TEST_TEMP_DIR"
   test_server_property_editor "$TEST_TEMP_DIR"
   test_property_import_and_explorer "$TEST_TEMP_DIR"
