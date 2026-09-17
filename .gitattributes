@@ -1,0 +1,2 @@
+# This WSL-first project keeps text files in LF format on every platform.
+* text=auto eol=lf
