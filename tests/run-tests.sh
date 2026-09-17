@@ -762,6 +762,10 @@ PROPERTIES
 if [[ "$*" == 'compose ps --status running --services' && "${MCSERVER_KIT_TEST_RUNNING:-false}" == true ]]; then
   printf 'minecraft\n'
 fi
+if [[ "${MCSERVER_KIT_TEST_DOCKER_MISSING:-false}" == true ]]; then
+  printf "The command 'docker' could not be found in this WSL 2 distro.\n" >&2
+  exit 127
+fi
 DOCKER
   cat >"${fake_bin}/wslpath" <<'WSLPATH'
 #!/usr/bin/env bash
@@ -770,6 +774,8 @@ WSLPATH
   cat >"${fake_bin}/explorer.exe" <<'EXPLORER'
 #!/usr/bin/env bash
 printf '%s\n' "$1" >"$MCSERVER_KIT_TEST_EXPLORER_LOG"
+[[ -z "${MCSERVER_KIT_TEST_EXPLORER_ERROR:-}" ]] || printf '%s\n' "$MCSERVER_KIT_TEST_EXPLORER_ERROR" >&2
+exit "${MCSERVER_KIT_TEST_EXPLORER_STATUS:-0}"
 EXPLORER
   chmod +x "${fake_bin}/docker" "${fake_bin}/wslpath" "${fake_bin}/explorer.exe"
 
@@ -835,6 +841,46 @@ WHIPTAIL
     MCSERVER_KIT_TEST_EXPLORER_LOG="${temp_dir}/property-import/explorer.log" \
     bash "${REPO_ROOT}/mcserver-kit" server alpha open data
   assert_equal "WIN:${server_dir}/data" "$(<"${temp_dir}/property-import/explorer.log")" 'open data passes the persistent folder to Explorer'
+
+  for part in data server; do
+    output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+      MCSERVER_KIT_TEST_EXPLORER_LOG="${temp_dir}/property-import/explorer.log" \
+      MCSERVER_KIT_TEST_EXPLORER_STATUS=1 \
+      bash "${REPO_ROOT}/mcserver-kit" server alpha open "$part")"
+    assert_equal '' "$output" "Explorer silent status 1 succeeds for $part without an error dialog"
+  done
+  assert_fails 'Explorer failure with diagnostics remains an error' \
+    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_CONFIG="$config_file" \
+      MCSERVER_KIT_TEST_EXPLORER_LOG="${temp_dir}/property-import/explorer.log" \
+      MCSERVER_KIT_TEST_EXPLORER_STATUS=1 MCSERVER_KIT_TEST_EXPLORER_ERROR='Access denied' \
+      bash "${REPO_ROOT}/mcserver-kit" server alpha open data
+  assert_fails 'Explorer execution failure remains an error' \
+    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_CONFIG="$config_file" \
+      MCSERVER_KIT_TEST_EXPLORER_LOG="${temp_dir}/property-import/explorer.log" \
+      MCSERVER_KIT_TEST_EXPLORER_STATUS=126 \
+      bash "${REPO_ROOT}/mcserver-kit" server alpha open server
+
+  cat >"${fake_bin}/whiptail" <<'WHIPTAIL'
+#!/usr/bin/env bash
+while (($#)); do
+  case "$1" in
+    --textbox) cat "$2" >"$MCSERVER_KIT_TEST_DIALOG_LOG"; exit 0 ;;
+    --menu) printf '__exit' >&2; exit 0 ;;
+  esac
+  shift
+done
+WHIPTAIL
+  local result=0
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+    MCSERVER_KIT_TEST_DOCKER_MISSING=true \
+    MCSERVER_KIT_TEST_DIALOG_LOG="${temp_dir}/property-import/dialog.log" \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/server-properties-tui.sh" alpha "$server_dir" 2>&1)" || result=$?
+  assert_equal 127 "$result" 'properties preserves the Docker failure exit code'
+  assert_equal '' "$output" 'Docker errors do not flash on the underlying terminal'
+  assert_equal "The command 'docker' could not be found in this WSL 2 distro." "$(<"${temp_dir}/property-import/dialog.log")" 'Docker diagnostic is presented in a persistent TUI textbox'
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/server-properties-tui.sh" alpha "$server_dir"
+  assert_equal 0 "$?" 'closing properties without changes succeeds'
 }
 
 main() {

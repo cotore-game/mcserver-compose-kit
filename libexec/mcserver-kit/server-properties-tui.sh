@@ -37,8 +37,28 @@ actcheckbox=white,blue
 fi
 
 die() {
-  printf '%s: %s\n' "$(tr common.error)" "$*" >&2
+  if command -v whiptail >/dev/null 2>&1; then
+    whiptail --title "$(tr common.error)" --msgbox "$*" 14 82 || true
+  else
+    printf '%s: %s\n' "$(tr common.error)" "$*" >&2
+  fi
   exit 1
+}
+
+run_checked() {
+  local output status
+  output="$(mktemp)"
+  if "$@" >"$output" 2>&1; then
+    [[ ! -s "$output" ]] || whiptail --title "$SERVER_ID" --textbox "$output" 22 84 || true
+    rm -f -- "$output"
+  else
+    status=$?
+    # Preserve Docker's actual diagnostic until the user dismisses the dialog.
+    [[ -s "$output" ]] || printf '%s (exit %s)\n' "$1" "$status" >"$output"
+    whiptail --title "$(tr common.error)" --textbox "$output" 22 84 || true
+    rm -f -- "$output"
+    exit "$status"
+  fi
 }
 
 setting_get() {
@@ -210,13 +230,13 @@ menu_item() {
 }
 
 finish() {
-  [[ "$changed" == true ]] || return
-  (cd "$SERVER_DIR" && docker compose config --quiet) || die "$(tr properties.compose_invalid)"
+  [[ "$changed" == true ]] || return 0
+  cd -- "$SERVER_DIR"
+  run_checked docker compose config --quiet
   if whiptail --yesno "$(tr properties.restart_prompt "$SERVER_ID")" 10 72; then
-    printf '%s\n' "$(tr properties.applying "$SERVER_ID")"
-    (cd "$SERVER_DIR" && docker compose up -d --force-recreate)
+    run_checked docker compose up -d --force-recreate
   else
-    printf '%s\n' "$(tr properties.saved_restart_later)"
+    whiptail --msgbox "$(tr properties.saved_restart_later)" 10 76 || true
   fi
 }
 
@@ -246,9 +266,9 @@ main() {
   [[ -f "${SERVER_DIR}/compose.yaml" ]] || die "$(tr server.compose_missing "$SERVER_ID")"
 
   if [[ ! -f "$SERVER_ENV" ]]; then
-    whiptail --yesno "$(tr properties.migration_prompt)" 11 76 || return
+    whiptail --yesno "$(tr properties.migration_prompt)" 11 76 || return 0
   fi
-  python3 "$CONFIG_TOOL" migrate "$SERVER_DIR"
+  run_checked python3 "$CONFIG_TOOL" migrate "$SERVER_DIR"
   if [[ "$(python3 "$CONFIG_TOOL" get "$SERVER_ENV" OVERRIDE_SERVER_PROPERTIES true)" == false ]]; then
     [[ -f "$SERVER_PROPERTIES" ]] || die "$(tr properties.file_missing)"
     local running
@@ -258,7 +278,8 @@ main() {
     fi
     manual_properties=true
   fi
-  (cd "$SERVER_DIR" && docker compose config --quiet) || die "$(tr properties.compose_invalid)"
+  cd -- "$SERVER_DIR"
+  run_checked docker compose config --quiet
 
   while true; do
     items=(
