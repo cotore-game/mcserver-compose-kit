@@ -9,6 +9,7 @@ import re
 import shutil
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 MANAGED_DEFAULTS = {
@@ -116,6 +117,98 @@ def read_properties(path: Path) -> dict[str, str]:
     return values
 
 
+def set_property(path: Path, env_key: str, value: str) -> None:
+    property_key = PROPERTY_KEYS[env_key]
+    if "\n" in value or "\r" in value:
+        raise ValueError("Property values cannot contain newlines")
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    replacement = f"{property_key}={value}\n"
+    indices = [
+        index for index, line in enumerate(lines)
+        if line.partition("=")[0].strip() == property_key
+    ]
+    if indices:
+        lines[indices[-1]] = replacement
+    else:
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] += "\n"
+        lines.append(replacement)
+    atomic_write(path, "".join(lines))
+
+
+def validate_properties_source(source: Path) -> None:
+    if not source.is_file():
+        raise ValueError(f"Not a file: {source}")
+    if source.name != "server.properties":
+        raise ValueError("Select a file named server.properties")
+    if not parse_import_properties(source):
+        raise ValueError("The selected file has no property entries")
+
+
+def parse_import_properties(source: Path) -> dict[str, str]:
+    """Read the simple key=value format emitted by Minecraft without dropping entries."""
+    values: dict[str, str] = {}
+    for number, line in enumerate(source.read_text(encoding="utf-8-sig").splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", "!")):
+            continue
+        if "=" not in line:
+            raise ValueError(f"Line {number}: expected key=value")
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", key):
+            raise ValueError(f"Line {number}: unsupported property key: {key}")
+        if "\\" in key or "\\" in value:
+            raise ValueError(f"Line {number}: escaped properties are not supported")
+        values[key] = value
+    if values.get("level-name", "world") != "world":
+        raise ValueError("level-name must be world for this server layout")
+    if values.get("server-port", "25565") != "25565":
+        raise ValueError("server-port must be 25565 for this server layout")
+    return values
+
+
+def import_properties(server_dir: Path, source: Path) -> Path | None:
+    validate_properties_source(source)
+    imported = parse_import_properties(source)
+    env_path = server_dir / "server.env"
+    values = read_env(env_path)
+    for env_key, property_key in PROPERTY_KEYS.items():
+        if property_key in imported:
+            values[env_key] = imported[property_key]
+    known = set(PROPERTY_KEYS.values()) | {"level-name", "server-port"}
+    extras = [f"{key}={value}" for key, value in imported.items() if key not in known]
+    values["CUSTOM_SERVER_PROPERTIES"] = "\n".join(extras)
+    values["OVERRIDE_SERVER_PROPERTIES"] = "true"
+
+    destination = server_dir / "data" / "server.properties"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if source.resolve() == destination.resolve():
+        raise ValueError("The source is already this server's server.properties")
+    backup = None
+    if destination.exists():
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup = destination.with_name(f"server.properties.mcserver-kit.{stamp}.bak")
+        suffix = 1
+        while backup.exists():
+            backup = destination.with_name(f"server.properties.mcserver-kit.{stamp}.{suffix}.bak")
+            suffix += 1
+        shutil.copy2(destination, backup)
+
+    descriptor, temporary_name = tempfile.mkstemp(prefix="server.properties.", dir=destination.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as output, source.open("rb") as input_file:
+            shutil.copyfileobj(input_file, output)
+        os.chmod(temporary_name, 0o644)
+        write_env(env_path, values)
+        os.replace(temporary_name, destination)
+    finally:
+        if os.path.exists(temporary_name):
+            os.unlink(temporary_name)
+
+    return backup
+
+
 def compose_environment(path: Path, dotenv: dict[str, str]) -> dict[str, str]:
     values: dict[str, str] = {}
     if not path.is_file():
@@ -195,7 +288,7 @@ def migrate(server_dir: Path) -> None:
     backup = server_dir / "compose.yaml.mcserver-kit.bak"
     if not target.exists() and not backup.exists():
         shutil.copy2(compose, backup)
-    values: dict[str, str] = {}
+    values: dict[str, str] = dict(existing)
     for env_key, default in MANAGED_DEFAULTS.items():
         property_key = PROPERTY_KEYS.get(env_key, "")
         values[env_key] = existing.get(
@@ -214,12 +307,44 @@ def migrate(server_dir: Path) -> None:
 
 def main() -> int:
     if len(sys.argv) < 3:
-        print("usage: server-config.py get|set|migrate TARGET [KEY] [VALUE]", file=sys.stderr)
+        print("usage: server-config.py get|set|migrate|property-get|property-set|import-properties TARGET [KEY] [VALUE]", file=sys.stderr)
         return 2
     operation = sys.argv[1]
     target = Path(sys.argv[2])
     if operation == "migrate" and len(sys.argv) == 3:
         migrate(target)
+        return 0
+    if operation == "validate-properties" and len(sys.argv) == 3:
+        try:
+            validate_properties_source(target)
+        except (OSError, ValueError, UnicodeError) as error:
+            print(f"Invalid server.properties: {error}", file=sys.stderr)
+            return 1
+        return 0
+    if operation == "import-properties" and len(sys.argv) == 4:
+        try:
+            backup = import_properties(target, Path(sys.argv[3]))
+        except (OSError, ValueError, UnicodeError) as error:
+            print(f"Import failed: {error}", file=sys.stderr)
+            return 1
+        if backup:
+            print(backup)
+        return 0
+    if operation == "property-get" and len(sys.argv) in (4, 5):
+        key = PROPERTY_KEYS.get(sys.argv[3])
+        if key is None:
+            return 2
+        default = sys.argv[4] if len(sys.argv) == 5 else ""
+        print(read_properties(target).get(key, default))
+        return 0
+    if operation == "property-set" and len(sys.argv) == 5:
+        if sys.argv[3] not in PROPERTY_KEYS:
+            return 2
+        try:
+            set_property(target, sys.argv[3], sys.argv[4])
+        except (OSError, ValueError, UnicodeError) as error:
+            print(f"Could not edit server.properties: {error}", file=sys.stderr)
+            return 1
         return 0
     if operation == "get" and len(sys.argv) in (4, 5):
         values = read_env(target)

@@ -169,6 +169,9 @@ mcserver-kit server <server-id> logs
 mcserver-kit server <server-id> logs --no-follow
 mcserver-kit server <server-id> down
 mcserver-kit server <server-id> properties
+mcserver-kit server <server-id> import-properties /path/to/server.properties
+mcserver-kit server <server-id> open data
+mcserver-kit server <server-id> open server
 ```
 
 `stop` and `shutdown` stop the container without removing it. `down` removes the container and network. These commands do not delete the server's `data/` directory.
@@ -183,7 +186,11 @@ mcserver-kit server <server-id> properties
 
 The editor covers MOTD, difficulty, game mode, player limit, online mode, whitelist, operators, flight, command blocks, PvP, view and simulation distance, spawn protection, Nether and entity spawning, and resource packs.
 
-`server.env` is the source of truth for settings managed by the toolkit. Docker Compose passes these values to `itzg/minecraft-server`, which applies them to `server.properties` when the container starts.
+Normally, `server.env` is the source of truth for settings managed by the toolkit. Docker Compose passes these values to `itzg/minecraft-server`, which applies them to `server.properties` when the container starts.
+
+For a distributed `server.properties`, stop the server and choose **Server settings → Import server.properties**, or run `mcserver-kit server <server-id> import-properties /path/to/server.properties`. On WSL, the settings screen offers a Windows file picker when Windows dialogs are enabled. The existing data file is backed up before replacement. Supported properties are imported into `server.env`; additional keys are stored in `CUSTOM_SERVER_PROPERTIES`. `server.env` remains the source of truth, and the imported file is also copied to `data/server.properties`. Imports with a nonstandard world name, port, or unsupported property syntax are rejected rather than silently changing the server layout. Do not edit the file while the server is running.
+
+The dashboard can also open the server folder or its persistent `data/` folder in Windows Explorer. From a terminal, use `mcserver-kit server <server-id> open server` or `open data`. This requires WSL interop with Explorer.
 
 When an older server is opened for the first time, the editor asks before migrating it. The original Compose file is saved as `compose.yaml.mcserver-kit.bak`.
 

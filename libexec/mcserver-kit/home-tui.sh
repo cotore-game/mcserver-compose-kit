@@ -116,6 +116,9 @@ dashboard_text() {
 pause_for_enter() {
   printf '\n%s' "$(tr home.press_enter)"
   read -r _ || true
+  # whiptail restores the underlying terminal screen when a dialog closes.
+  # Do not leave output from the previous CLI action beneath the next menu.
+  clear
 }
 
 run_and_show() {
@@ -131,15 +134,17 @@ run_and_show() {
 }
 
 server_action_menu() {
-  local id="$1" directory="$2" choice
+  local id="$1" directory="$2" choice output
   while true; do
-    choice="$(whiptail --title "$id" --menu "$(tr home.server_status "$(server_status "$directory")")" 21 78 11 \
+    choice="$(whiptail --title "$id" --menu "$(tr home.server_status "$(server_status "$directory")")" 23 78 13 \
       start "$(tr home.start)" \
       stop "$(tr home.stop)" \
       restart "$(tr home.restart)" \
       status "$(tr home.status)" \
       logs "$(tr home.logs)" \
       properties "$(tr home.properties)" \
+      open-data "$(tr home.open_data)" \
+      open-server "$(tr home.open_server)" \
       down "$(tr home.down)" \
       back "$(tr tui.back)" \
       3>&1 1>&2 2>&3)" || return
@@ -154,6 +159,16 @@ server_action_menu() {
         ;;
       properties)
         "${SCRIPT_DIR}/server-manager.sh" server "$id" properties || true
+        ;;
+      open-data | open-server)
+        new_temp_file output
+        if [[ "$choice" == open-data ]]; then
+          "${SCRIPT_DIR}/server-manager.sh" server "$id" open data >"$output" 2>&1 ||
+            whiptail --title "$(tr common.error)" --textbox "$output" 14 78
+        else
+          "${SCRIPT_DIR}/server-manager.sh" server "$id" open server >"$output" 2>&1 ||
+            whiptail --title "$(tr common.error)" --textbox "$output" 14 78
+        fi
         ;;
       down)
         if whiptail --yesno "$(tr home.down_confirm "$id")" 10 72; then
@@ -220,7 +235,7 @@ diagnostics() {
 }
 
 main() {
-  local root choice
+  local root choice installed_version
   command -v whiptail >/dev/null 2>&1 || {
     tr tui.missing >&2
     exit 1
@@ -256,7 +271,11 @@ main() {
       update)
         clear
         if "${SCRIPT_DIR}/update.sh"; then
-          exec "${ROOT_DIR}/mcserver-kit" home
+          installed_version="$(head -n 1 "${ROOT_DIR}/VERSION" 2>/dev/null || printf unknown)"
+          if [[ "$installed_version" != "$VERSION" ]]; then
+            clear
+            exec "${ROOT_DIR}/mcserver-kit" home
+          fi
         fi
         pause_for_enter
         ;;

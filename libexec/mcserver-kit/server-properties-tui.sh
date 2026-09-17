@@ -7,8 +7,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_ID="${1-}"
 SERVER_DIR="${2-}"
 SERVER_ENV="${SERVER_DIR}/server.env"
+SERVER_PROPERTIES="${SERVER_DIR}/data/server.properties"
 CONFIG_TOOL="${SCRIPT_DIR}/server-config.py"
 changed=false
+manual_properties=false
 
 # shellcheck source=libexec/mcserver-kit/i18n.sh
 source "${SCRIPT_DIR}/i18n.sh"
@@ -35,16 +37,52 @@ actcheckbox=white,blue
 fi
 
 die() {
-  printf '%s: %s\n' "$(tr common.error)" "$*" >&2
+  if command -v whiptail >/dev/null 2>&1; then
+    whiptail --title "$(tr common.error)" --msgbox "$*" 14 82 || true
+  else
+    printf '%s: %s\n' "$(tr common.error)" "$*" >&2
+  fi
   exit 1
 }
 
+run_checked() {
+  local output status
+  output="$(mktemp)"
+  if "$@" >"$output" 2>&1; then
+    [[ ! -s "$output" ]] || whiptail --title "$SERVER_ID" --textbox "$output" 22 84 || true
+    rm -f -- "$output"
+  else
+    status=$?
+    # Preserve Docker's actual diagnostic until the user dismisses the dialog.
+    [[ -s "$output" ]] || printf '%s (exit %s)\n' "$1" "$status" >"$output"
+    whiptail --title "$(tr common.error)" --textbox "$output" 22 84 || true
+    rm -f -- "$output"
+    exit "$status"
+  fi
+}
+
 setting_get() {
-  python3 "$CONFIG_TOOL" get "$SERVER_ENV" "$1" "$2"
+  if [[ "$manual_properties" == true ]]; then
+    case "$1" in
+      WHITELIST | EXISTING_WHITELIST_FILE | OPS | EXISTING_OPS_FILE)
+        python3 "$CONFIG_TOOL" get "$SERVER_ENV" "$1" "$2" ;;
+      *) python3 "$CONFIG_TOOL" property-get "$SERVER_PROPERTIES" "$1" "$2" ;;
+    esac
+  else
+    python3 "$CONFIG_TOOL" get "$SERVER_ENV" "$1" "$2"
+  fi
 }
 
 setting_set() {
-  python3 "$CONFIG_TOOL" set "$SERVER_ENV" "$1" "$2"
+  if [[ "$manual_properties" == true ]]; then
+    case "$1" in
+      WHITELIST | EXISTING_WHITELIST_FILE | OPS | EXISTING_OPS_FILE)
+        python3 "$CONFIG_TOOL" set "$SERVER_ENV" "$1" "$2" ;;
+      *) python3 "$CONFIG_TOOL" property-set "$SERVER_PROPERTIES" "$1" "$2" ;;
+    esac
+  else
+    python3 "$CONFIG_TOOL" set "$SERVER_ENV" "$1" "$2"
+  fi
   changed=true
 }
 
@@ -192,14 +230,33 @@ menu_item() {
 }
 
 finish() {
-  [[ "$changed" == true ]] || return
-  (cd "$SERVER_DIR" && docker compose config --quiet) || die "$(tr properties.compose_invalid)"
+  [[ "$changed" == true ]] || return 0
+  cd -- "$SERVER_DIR"
+  run_checked docker compose config --quiet
   if whiptail --yesno "$(tr properties.restart_prompt "$SERVER_ID")" 10 72; then
-    printf '%s\n' "$(tr properties.applying "$SERVER_ID")"
-    (cd "$SERVER_DIR" && docker compose up -d --force-recreate)
+    run_checked docker compose up -d --force-recreate
   else
-    printf '%s\n' "$(tr properties.saved_restart_later)"
+    whiptail --msgbox "$(tr properties.saved_restart_later)" 10 76 || true
   fi
+}
+
+import_properties() {
+  local output result
+  whiptail --yesno "$(tr home.import_confirm "$SERVER_ID")" 12 76 || return
+  output="$(mktemp)"
+  if "${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" import-properties >"$output" 2>&1; then
+    if [[ -s "$output" ]]; then
+      whiptail --title "$(tr properties.import)" --textbox "$output" 16 82
+      manual_properties=false
+      changed=true
+    fi
+  else
+    result=$?
+    whiptail --title "$(tr common.error)" --textbox "$output" 16 82
+    rm -f -- "$output"
+    return "$result"
+  fi
+  rm -f -- "$output"
 }
 
 main() {
@@ -209,10 +266,20 @@ main() {
   [[ -f "${SERVER_DIR}/compose.yaml" ]] || die "$(tr server.compose_missing "$SERVER_ID")"
 
   if [[ ! -f "$SERVER_ENV" ]]; then
-    whiptail --yesno "$(tr properties.migration_prompt)" 11 76 || return
+    whiptail --yesno "$(tr properties.migration_prompt)" 11 76 || return 0
   fi
-  python3 "$CONFIG_TOOL" migrate "$SERVER_DIR"
-  (cd "$SERVER_DIR" && docker compose config --quiet) || die "$(tr properties.compose_invalid)"
+  run_checked python3 "$CONFIG_TOOL" migrate "$SERVER_DIR"
+  if [[ "$(python3 "$CONFIG_TOOL" get "$SERVER_ENV" OVERRIDE_SERVER_PROPERTIES true)" == false ]]; then
+    [[ -f "$SERVER_PROPERTIES" ]] || die "$(tr properties.file_missing)"
+    local running
+    running="$(cd "$SERVER_DIR" && docker compose ps --status running --services)" || die "$(tr server.status_failed)"
+    if [[ -n "$running" ]]; then
+      die "$(tr properties.stop_first "$SERVER_ID")"
+    fi
+    manual_properties=true
+  fi
+  cd -- "$SERVER_DIR"
+  run_checked docker compose config --quiet
 
   while true; do
     items=(
@@ -233,11 +300,13 @@ main() {
       SIMULATION_DISTANCE "$(menu_item "$(tr properties.simulation_distance)" "$(setting_get SIMULATION_DISTANCE 10)")"
       __more "$(tr properties.more_settings)"
       __resource "$(tr properties.resource_pack_settings)"
+      __import "$(tr properties.import)"
       __exit "$(tr properties.exit)"
     )
     selected="$(whiptail --title "${SERVER_ID}" --menu "$(tr properties.choose)" 25 94 18 "${items[@]}" 3>&1 1>&2 2>&3)" || break
     case "$selected" in
       __exit) break ;;
+      __import) import_properties || true ;;
       __more)
         selected="$(whiptail --title "${SERVER_ID}" --menu "$(tr properties.more_settings)" 24 90 15 \
           FORCE_GAMEMODE "$(menu_item "$(tr properties.force_gamemode)" "$(setting_get FORCE_GAMEMODE false)")" \
