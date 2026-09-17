@@ -68,12 +68,7 @@ tool_availability() {
 }
 
 server_status() {
-  local directory="$1"
-  if (cd "$directory" && docker compose ps --status running --services 2>/dev/null | grep -qx minecraft); then
-    tr home.running
-  else
-    tr home.stopped
-  fi
+  "${SCRIPT_DIR}/server-manager.sh" server "$(basename "$1")" state
 }
 
 logo() {
@@ -100,7 +95,7 @@ dashboard_text() {
     for directory in "$root"/*; do
       [[ -d "$directory" && -f "${directory}/compose.yaml" ]] || continue
       total=$((total + 1))
-      if (cd "$directory" && docker compose ps --status running --services 2>/dev/null | grep -qx minecraft); then
+      if [[ "$("${SCRIPT_DIR}/server-manager.sh" server "$(basename "$directory")" state --raw)" == running ]]; then
         running=$((running + 1))
       fi
     done
@@ -124,13 +119,30 @@ pause_for_enter() {
 run_and_show() {
   local title="$1"
   shift
-  local output
+  local output pid result=0 frame_index=0
+  local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
   new_temp_file output
-  if "$@" >"$output" 2>&1; then
-    whiptail --title "$title" --textbox "$output" 22 84
-  else
-    whiptail --title "$(tr common.error)" --textbox "$output" 22 84
+  "$@" >"$output" 2>&1 &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    whiptail --title "$title" --infobox "$(tr home.processing "${frames[frame_index]}" "$title")" 8 72
+    frame_index=$(((frame_index + 1) % ${#frames[@]}))
+    sleep 0.15
+  done
+  wait "$pid" || result=$?
+  if [[ ! -s "$output" ]]; then
+    if ((result == 0)); then
+      tr home.completed >"$output"
+    else
+      tr home.failed_without_output >"$output"
+    fi
   fi
+  if ((result == 0)); then
+    whiptail --title "$title" --textbox "$output" 22 84 || true
+  else
+    whiptail --title "$(tr common.error)" --textbox "$output" 22 84 || true
+  fi
+  RUN_RESULT=$result
 }
 
 server_action_menu() {
@@ -138,6 +150,7 @@ server_action_menu() {
   while true; do
     choice="$(whiptail --title "$id" --menu "$(tr home.server_status "$(server_status "$directory")")" 23 78 13 \
       start "$(tr home.start)" \
+      down "$(tr home.down)" \
       stop "$(tr home.stop)" \
       restart "$(tr home.restart)" \
       status "$(tr home.status)" \
@@ -145,15 +158,15 @@ server_action_menu() {
       properties "$(tr home.properties)" \
       open-data "$(tr home.open_data)" \
       open-server "$(tr home.open_server)" \
-      down "$(tr home.down)" \
       back "$(tr tui.back)" \
       3>&1 1>&2 2>&3)" || return
     case "$choice" in
       start | stop | restart | status)
-        run_and_show "$id" "${SCRIPT_DIR}/server-manager.sh" server "$id" "$choice"
+        run_and_show "$(tr "home.${choice}") · $id" "${SCRIPT_DIR}/server-manager.sh" server "$id" "$choice"
         ;;
       logs)
         clear
+        printf '%s\n\n' "$(tr home.logs_return_hint)"
         "${SCRIPT_DIR}/server-manager.sh" server "$id" logs || true
         pause_for_enter
         ;;
@@ -172,7 +185,7 @@ server_action_menu() {
         ;;
       down)
         if whiptail --yesno "$(tr home.down_confirm "$id")" 10 72; then
-          run_and_show "$id" "${SCRIPT_DIR}/server-manager.sh" server "$id" down
+          run_and_show "$(tr home.down) · $id" "${SCRIPT_DIR}/server-manager.sh" server "$id" down
         fi
         ;;
       back) return ;;
@@ -235,7 +248,7 @@ diagnostics() {
 }
 
 main() {
-  local root choice installed_version
+  local root choice installed_version latest
   command -v whiptail >/dev/null 2>&1 || {
     tr tui.missing >&2
     exit 1
@@ -269,15 +282,18 @@ main() {
       language) language_menu ;;
       diagnostics) diagnostics ;;
       update)
-        clear
-        if "${SCRIPT_DIR}/update.sh"; then
-          installed_version="$(head -n 1 "${ROOT_DIR}/VERSION" 2>/dev/null || printf unknown)"
-          if [[ "$installed_version" != "$VERSION" ]]; then
-            clear
-            exec "${ROOT_DIR}/mcserver-kit" home
+        run_and_show "$(tr home.update)" "${SCRIPT_DIR}/update.sh" check
+        if ((RUN_RESULT == 0)); then
+          latest="$("${SCRIPT_DIR}/update.sh" --cached-quiet 2>/dev/null || true)"
+          if [[ -n "$latest" ]] && whiptail --yesno "$(tr home.update_confirm "$VERSION" "$latest")" 10 72; then
+            run_and_show "$(tr home.update)" "${SCRIPT_DIR}/update.sh" --yes
+            installed_version="$(head -n 1 "${ROOT_DIR}/VERSION" 2>/dev/null || printf unknown)"
+            if ((RUN_RESULT == 0)) && [[ "$installed_version" != "$VERSION" ]]; then
+              clear
+              exec "${ROOT_DIR}/mcserver-kit" home
+            fi
           fi
         fi
-        pause_for_enter
         ;;
       help) run_and_show "$(tr home.help)" "${ROOT_DIR}/mcserver-kit" --help ;;
       exit) return ;;
