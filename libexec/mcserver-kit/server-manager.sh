@@ -89,27 +89,7 @@ container_state() {
     printf 'unavailable\n'
     return
   fi
-  printf '%s\n' "$listing" | python3 -c '
-import json
-import sys
-
-data = sys.stdin.read().strip()
-if not data:
-    print("absent")
-    sys.exit()
-try:
-    containers = json.loads(data) if data.startswith("[") else [json.loads(line) for line in data.splitlines()]
-except (ValueError, TypeError):
-    print("unavailable")
-    sys.exit()
-minecraft = [c for c in containers if c.get("Service") == "minecraft"]
-if any(c.get("State", "").lower() == "running" for c in minecraft):
-    print("running")
-elif containers:
-    print("stopped")
-else:
-    print("absent")
-'
+  printf '%s\n' "$listing" | python3 "${SCRIPT_DIR}/compose-state.py"
 }
 
 server_state() {
