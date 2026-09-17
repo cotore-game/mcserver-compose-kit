@@ -125,7 +125,7 @@ import_properties() {
 }
 
 open_folder() {
-  local directory="$1" part="${2:-data}" target windows_path
+  local directory="$1" part="${2:-data}" target windows_path output status
   case "$part" in
     data) target="${directory}/data" ;;
     server) target="$directory" ;;
@@ -136,7 +136,16 @@ open_folder() {
     die "$(tr server.explorer_unavailable)"
   fi
   windows_path="$(wslpath -w "$target")" || die "$(tr server.explorer_unavailable)"
-  explorer.exe "$windows_path"
+  # Explorer can return 1 after handing the folder to an existing window.
+  # Only accept that status when it supplied no error diagnostics.
+  if output="$(explorer.exe "$windows_path" 2>&1)"; then
+    return 0
+  else
+    status=$?
+  fi
+  [[ "$status" == 1 && -z "$output" ]] && return 0
+  [[ -z "$output" ]] || printf '%s\n' "$output" >&2
+  die "$(tr server.explorer_unavailable)"
 }
 
 manage_server() {
