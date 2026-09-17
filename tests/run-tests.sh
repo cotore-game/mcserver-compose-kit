@@ -101,6 +101,11 @@ JSON
   python3 "${REPO_ROOT}/scripts/validate-locales.py" "${locale_root}/locales" 2>"$validation_log" >/dev/null
   assert_equal 'present' "$(grep -q 'missing keys use English fallback: new_key' "$validation_log" && printf present)" \
     'locale validation reports missing translations without failing'
+
+  MCSERVER_KIT_LANG=en bash -c 'source "$1"; load_messages; tr update.up_to_date v1.1.3' \
+    _ "${REPO_ROOT}/libexec/mcserver-kit/i18n.sh" >"${locale_root}/newline"
+  assert_equal '10' "$(tail -c 1 "${locale_root}/newline" | od -An -tu1 | tr -d ' ')" \
+    'locale messages preserve their final newline'
 }
 
 test_installer_version_selection() {
@@ -494,13 +499,18 @@ paths:
 CONFIG
   cat >"${fake_bin}/whiptail" <<'WHIPTAIL'
 #!/usr/bin/env bash
-printf 'menu\n' >>"$MCSERVER_KIT_TEST_EVENTS"
-if [[ ! -f "$MCSERVER_KIT_TEST_MENU_COUNT" ]]; then
-  : >"$MCSERVER_KIT_TEST_MENU_COUNT"
-  printf 'update' >&2
-else
-  printf 'exit' >&2
-fi
+case " $* " in
+  *' --menu '*)
+    printf 'menu\n' >>"$MCSERVER_KIT_TEST_EVENTS"
+    if [[ ! -f "$MCSERVER_KIT_TEST_MENU_COUNT" ]]; then
+      : >"$MCSERVER_KIT_TEST_MENU_COUNT"
+      printf 'update' >&2
+    else
+      printf 'exit' >&2
+    fi ;;
+  *' --infobox '*) printf 'loading\n' >>"$MCSERVER_KIT_TEST_EVENTS" ;;
+  *' --textbox '*) printf 'result\n' >>"$MCSERVER_KIT_TEST_EVENTS" ;;
+esac
 WHIPTAIL
   cat >"${fake_bin}/clear" <<'CLEAR'
 #!/usr/bin/env bash
@@ -512,16 +522,16 @@ printf '%s' "$MCSERVER_KIT_TEST_LATEST_URL"
 CURL
   chmod +x "${fake_bin}/whiptail" "${fake_bin}/clear" "${fake_bin}/curl"
 
-  output="$(printf '\n' | PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
     MCSERVER_KIT_CONFIG="$config_file" MCSERVER_KIT_TUI_TEST=true \
     MCSERVER_KIT_CURRENT_VERSION="$repo_version" \
     MCSERVER_KIT_TEST_LATEST_URL="https://github.com/cotore-game/mcserver-compose-kit/releases/tag/v${repo_version}" \
     MCSERVER_KIT_UPDATE_CACHE_DIR="${temp_dir}/home-transition/cache" \
     MCSERVER_KIT_TEST_EVENTS="$event_log" MCSERVER_KIT_TEST_MENU_COUNT="$menu_count" \
     bash "${REPO_ROOT}/mcserver-kit" home)"
-  assert_equal 'present' "$(grep -Fq "v${repo_version} is up to date." <<<"$output" && printf present)" 'up-to-date status is shown before returning to the home menu'
-  assert_equal 'present' "$(grep -Fq 'Press Enter to return' <<<"$output" && printf present)" 'up-to-date status waits for Enter instead of restarting the TUI'
-  assert_equal $'menu\nclear\nclear\nmenu' "$(<"$event_log")" 'terminal output is cleared before the next TUI menu'
+  assert_equal 'present' "$(grep -Fq 'loading' "$event_log" && printf present)" 'update checks retain a progress dialog'
+  assert_equal 'present' "$(grep -Fq 'result' "$event_log" && printf present)" 'update result is shown in a persistent dialog'
+  assert_equal 'menu' "$(tail -n 1 "$event_log")" 'the home menu returns after viewing the update result'
 }
 
 test_setup_command() {
@@ -605,6 +615,17 @@ CONFIG
   assert_equal '600' "$(stat -c '%a' "$config_file")" 'config editor preserves restricted permissions'
 }
 
+test_compose_state_parser() {
+  local parser="${REPO_ROOT}/libexec/mcserver-kit/compose-state.py"
+  assert_equal 'absent' "$(printf '\n' | python3 "$parser")" 'empty Compose output means no containers'
+  assert_equal 'absent' "$(printf '[]\n' | python3 "$parser")" 'an empty Compose array means no containers'
+  assert_equal 'running' "$(printf '[{"Service":"minecraft","State":"running"}]\n' | python3 "$parser")" 'array output detects the running server'
+  assert_equal 'stopped' "$(printf '{"Service":"minecraft","State":"exited"}\n' | python3 "$parser")" 'object output detects a retained container'
+  assert_equal 'running' "$(printf '%s\n%s\n' '{"Service":"playit","State":"running"}' '{"Service":"minecraft","State":"running"}' | python3 "$parser")" 'newline-delimited output finds the Minecraft container'
+  assert_equal 'unavailable' "$(printf '{invalid\n' | python3 "$parser")" 'malformed Compose JSON is not mistaken for no container'
+  assert_equal 'unavailable' "$(printf '123\n' | python3 "$parser")" 'unexpected Compose JSON shapes are rejected'
+}
+
 test_server_management() {
   local temp_dir="$1"
   local root="${temp_dir}/server-management/servers"
@@ -622,15 +643,43 @@ CONFIG
   cat >"${fake_bin}/docker" <<'DOCKER'
 #!/usr/bin/env bash
 printf '%s|%s\n' "$PWD" "$*" >>"$MCSERVER_KIT_TEST_DOCKER_LOG"
-if [[ "$*" == 'compose ps --status running --services' ]]; then
-  printf 'minecraft\n'
-fi
+case "$*" in
+  'compose ps -a --format json')
+    case "${MCSERVER_KIT_TEST_DOCKER_STATE:-running}" in
+      running) printf '{"Service":"minecraft","State":"running"}\n' ;;
+      exited) printf '[{"Service":"minecraft","State":"exited"}]\n' ;;
+      absent) : ;;
+      unavailable) exit 1 ;;
+    esac ;;
+  'compose ps -a') printf 'NAME  SERVICE  STATUS\n' ;;
+esac
 DOCKER
   chmod +x "${fake_bin}/docker"
 
   output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
     MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" bash "${REPO_ROOT}/mcserver-kit" list)"
   assert_equal 'present' "$(grep -q 'alpha.*running' <<<"$output" && printf present)" 'list shows managed servers and their status'
+
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_TEST_DOCKER_STATE=exited MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" \
+    bash "${REPO_ROOT}/mcserver-kit" list)"
+  assert_equal 'present' "$(grep -q 'alpha.*stopped (container retained)' <<<"$output" && printf present)" \
+    'list distinguishes stopped containers from removed containers'
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_TEST_DOCKER_STATE=absent MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha status)"
+  assert_equal 'present' "$(grep -q 'No containers exist' <<<"$output" && printf present)" \
+    'status explains an empty container list'
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_TEST_DOCKER_STATE=absent MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha logs --no-follow)"
+  assert_equal 'present' "$(grep -q 'there are no container logs' <<<"$output" && printf present)" \
+    'logs explain when no container exists'
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_TEST_DOCKER_STATE=unavailable MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" \
+    bash "${REPO_ROOT}/mcserver-kit" list)"
+  assert_equal 'present' "$(grep -q 'Docker unavailable' <<<"$output" && printf present)" \
+    'Docker failures are not mislabeled as stopped servers'
 
   PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
     MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" bash "${REPO_ROOT}/mcserver-kit" server alpha start >/dev/null
@@ -919,6 +968,7 @@ main() {
   test_setup_command "$TEST_TEMP_DIR"
   test_reset_command "$TEST_TEMP_DIR"
   test_config_value_editor "$TEST_TEMP_DIR"
+  test_compose_state_parser
   test_server_management "$TEST_TEMP_DIR"
   test_server_property_editor "$TEST_TEMP_DIR"
   test_property_import_and_explorer "$TEST_TEMP_DIR"

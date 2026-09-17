@@ -43,10 +43,12 @@ load_messages() {
 
 load_catalog() {
   local catalog="$1"
-  local key encoded
+  local key encoded decoded
   while IFS=$'\t' read -r key encoded; do
     [[ -n "$key" ]] || continue
-    I18N_MESSAGES["$key"]="$(printf '%s' "$encoded" | base64 --decode)"
+    # The sentinel prevents command substitution from stripping translated newlines.
+    decoded="$(printf '%s' "$encoded" | base64 --decode; printf '\034')"
+    I18N_MESSAGES["$key"]="${decoded%$'\034'}"
   done < <(python3 - "$catalog" <<'PYTHON'
 import base64
 import json

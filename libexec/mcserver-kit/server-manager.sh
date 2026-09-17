@@ -66,10 +66,7 @@ list_servers() {
     [[ -d "$directory" && -f "${directory}/compose.yaml" ]] || continue
     found=true
     printf '%-28s ' "$(basename "$directory")"
-    (
-      cd "$directory"
-      docker compose ps --status running --services 2>/dev/null | grep -qx minecraft && printf '%s\n' "$(tr server.running)" || printf '%s\n' "$(tr server.stopped)"
-    )
+    server_state "$directory"
   done
   shopt -u nullglob
   [[ "$found" == true ]] || printf '%s\n' "$(tr server.none)"
@@ -82,6 +79,24 @@ compose_in() {
     cd "$directory"
     docker compose "$@"
   )
+}
+
+# Compose emits either a JSON array or one object per line, depending on version.
+# Keep these machine-readable values separate from the translated menu labels.
+container_state() {
+  local directory="$1" listing
+  if ! listing="$(compose_in "$directory" ps -a --format json 2>/dev/null)"; then
+    printf 'unavailable\n'
+    return
+  fi
+  printf '%s\n' "$listing" | python3 "${SCRIPT_DIR}/compose-state.py"
+}
+
+server_state() {
+  local state
+  state="$(container_state "$1")"
+  tr "server.state_${state}"
+  printf '\n'
 }
 
 require_stopped() {
@@ -174,13 +189,39 @@ manage_server() {
       compose_in "$directory" ps
       ;;
     status)
-      compose_in "$directory" ps
+      if [[ "$(container_state "$directory")" == absent ]]; then
+        tr server.no_containers
+      else
+        compose_in "$directory" ps -a
+      fi
       ;;
     logs)
+      if [[ "$(container_state "$directory")" == absent ]]; then
+        tr server.no_containers_logs
+        return
+      fi
       if [[ "${1-}" == '--no-follow' ]]; then
-        compose_in "$directory" logs minecraft
+        local log_file result=0
+        log_file="$(mktemp /tmp/mcserver-kit-logs.XXXXXX)"
+        compose_in "$directory" logs minecraft >"$log_file" || result=$?
+        if [[ -s "$log_file" ]]; then
+          cat -- "$log_file"
+        elif ((result == 0)); then
+          tr server.no_logs
+        fi
+        rm -f -- "$log_file"
+        if ((result != 0)); then
+          return "$result"
+        fi
       else
         compose_in "$directory" logs --follow minecraft
+      fi
+      ;;
+    state)
+      if [[ "${1-}" == '--raw' ]]; then
+        container_state "$directory"
+      else
+        server_state "$directory"
       fi
       ;;
     down)
