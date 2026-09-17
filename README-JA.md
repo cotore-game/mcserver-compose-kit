@@ -47,7 +47,7 @@ curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/ma
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | \
-  bash -s -- --version v1.1.1
+  bash -s -- --version v1.1.3
 ```
 
 インストーラーはリリースの圧縮ファイルを取得し、SHA-256を検証して`~/.local/share/mcserver-compose-kit`へ配置します。また、`~/.local/bin`用のPATH設定を管理ブロックとして`~/.bashrc`へ追加します。

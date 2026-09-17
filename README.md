@@ -47,7 +47,7 @@ Install a specific release:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | \
-  bash -s -- --version v1.1.1
+  bash -s -- --version v1.1.3
 ```
 
 The installer downloads the release archive, verifies its SHA-256 checksum, and installs the program under `~/.local/share/mcserver-compose-kit`. It also adds a managed PATH block for `~/.local/bin` to `~/.bashrc`.
