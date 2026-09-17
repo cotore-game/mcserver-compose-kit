@@ -439,12 +439,16 @@ test_local_installation() {
 
 test_home_dashboard() {
   local temp_dir="$1"
+  local repo_version next_version major minor patch
   local config_file="${temp_dir}/home/config.yml"
   local fake_bin="${temp_dir}/home/bin"
   local whiptail_log="${temp_dir}/home/whiptail.log"
   local update_cache="${temp_dir}/home/update-cache"
-  local curl_count="${temp_dir}/home/curl-count"
   local output
+
+  repo_version="$(head -n 1 "${REPO_ROOT}/VERSION")"
+  IFS=. read -r major minor patch <<<"$repo_version"
+  next_version="v${major}.${minor}.$((patch + 1))"
 
   mkdir -p "$fake_bin"
   cat >"$config_file" <<CONFIG
@@ -456,24 +460,23 @@ CONFIG
 printf '%s\n' "$*" >>"$MCSERVER_KIT_TEST_WHIPTAIL_LOG"
 printf 'exit' >&2
 WHIPTAIL
-  cat >"${fake_bin}/curl" <<'CURL'
-#!/usr/bin/env bash
-printf x >>"$MCSERVER_KIT_TEST_CURL_COUNT"
-printf '%s' 'https://github.com/cotore-game/mcserver-compose-kit/releases/tag/v1.1.1'
-CURL
-  chmod +x "${fake_bin}/whiptail" "${fake_bin}/curl"
+  chmod +x "${fake_bin}/whiptail"
+  mkdir -p "$update_cache"
+  printf '%s\n%s\n' "$(date +%s)" "$next_version" >"${update_cache}/update-check"
+  output="$(MCSERVER_KIT_CURRENT_VERSION="$repo_version" MCSERVER_KIT_UPDATE_CACHE_DIR="$update_cache" \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/update.sh" --cached-quiet)"
+  assert_equal "$next_version" "$output" 'the dashboard fixture contains a newer cached release'
 
   output="$(MCSERVER_KIT_LANG=en bash "${REPO_ROOT}/mcserver-kit")"
   assert_equal 'present' "$(grep -q 'mcserver-kit home' <<<"$output" && printf present)" 'non-interactive no-argument use shows help instead of starting creation'
 
   PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
-    MCSERVER_KIT_CURRENT_VERSION=1.1.0 MCSERVER_KIT_UPDATE_CACHE_DIR="$update_cache" \
-    MCSERVER_KIT_TEST_CURL_COUNT="$curl_count" \
+    MCSERVER_KIT_CURRENT_VERSION="$repo_version" MCSERVER_KIT_UPDATE_CACHE_DIR="$update_cache" \
     MCSERVER_KIT_TUI_TEST=true MCSERVER_KIT_TEST_WHIPTAIL_LOG="$whiptail_log" \
     bash "${REPO_ROOT}/mcserver-kit" home
   assert_equal 'present' "$(grep -q -- '--backtitle mcserver-kit' "$whiptail_log" && printf present)" 'the home command opens the interactive dashboard'
   assert_equal 'present' "$(grep -q 'servers Servers' "$whiptail_log" && printf present)" 'the dashboard exposes server management'
-  assert_equal 'present' "$(grep -q 'Update available: v1.1.1' "$whiptail_log" && printf present)" 'the dashboard announces a newer cached release'
+  assert_equal 'present' "$(grep -Fq "Update available: $next_version" "$whiptail_log" && printf present)" 'the dashboard announces a newer cached release'
 }
 
 test_home_screen_transition_after_current_update() {
@@ -754,8 +757,13 @@ PROPERTIES
 # distributed settings
 motd=Distributed MOTD
 difficulty=hard
+level-name=Fantasia_Arena_World
+level-type=minecraft\:normal
 custom-setting=preserve-me
 plugin.option=enabled
+plugin.label=\u00a7a
+plugin.description=first \
+  second
 PROPERTIES
   cat >"${fake_bin}/docker" <<'DOCKER'
 #!/usr/bin/env bash
@@ -795,6 +803,14 @@ PROPERTIES
       bash "${REPO_ROOT}/mcserver-kit" server alpha import-properties "${source_dir}/incompatible/server.properties"
   assert_equal 'Old MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" MOTD)" 'rejected import leaves the environment unchanged'
 
+  cat >"${source_dir}/incompatible/server.properties" <<'PROPERTIES'
+plugin.option=\u12G4
+PROPERTIES
+  assert_fails 'malformed Unicode escapes are rejected before migration' \
+    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+      bash "${REPO_ROOT}/mcserver-kit" server alpha import-properties "${source_dir}/incompatible/server.properties"
+  assert_equal 'Old MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" MOTD)" 'malformed escape leaves the environment unchanged'
+
   assert_fails 'import refuses to replace properties while the server is running' \
     env PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
       MCSERVER_KIT_TEST_RUNNING=true bash "${REPO_ROOT}/mcserver-kit" server alpha import-properties "${source_dir}/server.properties"
@@ -806,7 +822,8 @@ PROPERTIES
   assert_equal 'true' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" OVERRIDE_SERVER_PROPERTIES)" 'import keeps server.env authoritative'
   assert_equal 'Distributed MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" MOTD)" 'import converts managed properties to environment settings'
   assert_equal 'hard' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" DIFFICULTY)" 'import updates the difficulty'
-  assert_equal $'custom-setting=preserve-me\nplugin.option=enabled' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" CUSTOM_SERVER_PROPERTIES)" 'import converts extra properties to CUSTOM_SERVER_PROPERTIES'
+  assert_equal $'level-type=minecraft:normal\ncustom-setting=preserve-me\nplugin.option=enabled\nplugin.label=§a\nplugin.description=first second' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" CUSTOM_SERVER_PROPERTIES)" 'import decodes Java escapes and keeps extra properties'
+  assert_equal 'absent' "$(! python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" CUSTOM_SERVER_PROPERTIES | grep -q '^level-name=' && printf absent)" 'source world name does not override the managed world directory'
   assert_equal 'present' "$(grep -q 'custom-setting=preserve-me' "${server_dir}/data/server.properties" && printf present)" 'import keeps custom settings'
   assert_equal 'present' "$(grep -q 'motd=Old MOTD' "${server_dir}"/data/server.properties.mcserver-kit.*.bak && printf present)" 'import backs up the previous properties'
   assert_equal 'present' "$(grep -q 'Previous server.properties backup' <<<"$output" && printf present)" 'import reports the backup location'

@@ -47,7 +47,7 @@ Install a specific release:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | \
-  bash -s -- --version v1.1.1
+  bash -s -- --version v1.1.3
 ```
 
 The installer downloads the release archive, verifies its SHA-256 checksum, and installs the program under `~/.local/share/mcserver-compose-kit`. It also adds a managed PATH block for `~/.local/bin` to `~/.bashrc`.
@@ -188,7 +188,7 @@ The editor covers MOTD, difficulty, game mode, player limit, online mode, whitel
 
 Normally, `server.env` is the source of truth for settings managed by the toolkit. Docker Compose passes these values to `itzg/minecraft-server`, which applies them to `server.properties` when the container starts.
 
-For a distributed `server.properties`, stop the server and choose **Server settings → Import server.properties**, or run `mcserver-kit server <server-id> import-properties /path/to/server.properties`. On WSL, the settings screen offers a Windows file picker when Windows dialogs are enabled. The existing data file is backed up before replacement. Supported properties are imported into `server.env`; additional keys are stored in `CUSTOM_SERVER_PROPERTIES`. `server.env` remains the source of truth, and the imported file is also copied to `data/server.properties`. Imports with a nonstandard world name, port, or unsupported property syntax are rejected rather than silently changing the server layout. Do not edit the file while the server is running.
+For a distributed `server.properties`, stop the server and choose **Server settings → Import server.properties**, or run `mcserver-kit server <server-id> import-properties /path/to/server.properties`. On WSL, the settings screen offers a Windows file picker when Windows dialogs are enabled. The existing data file is backed up before replacement. Supported properties are imported into `server.env`; additional keys are stored in `CUSTOM_SERVER_PROPERTIES`. `server.env` remains the source of truth, and the imported file is also copied to `data/server.properties`. Java Properties escapes such as `\:` are decoded. If the distributed `level-name` differs, the toolkit keeps its existing `data/world` layout and Compose's `LEVEL=world` setting. A nonstandard server port or malformed property is rejected before changing the server. Do not edit the file while the server is running.
 
 The dashboard can also open the server folder or its persistent `data/` folder in Windows Explorer. From a terminal, use `mcserver-kit server <server-id> open server` or `open data`. This requires WSL interop with Explorer.
 

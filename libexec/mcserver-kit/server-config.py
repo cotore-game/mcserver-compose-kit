@@ -145,24 +145,73 @@ def validate_properties_source(source: Path) -> None:
         raise ValueError("The selected file has no property entries")
 
 
+def unescape_import_property(value: str, number: int) -> str:
+    """Decode Java Properties escapes before passing values to itzg."""
+    result: list[str] = []
+    index = 0
+    escapes = {"t": "\t", "r": "\r", "n": "\n", "f": "\f"}
+    while index < len(value):
+        char = value[index]
+        if char != "\\":
+            result.append(char)
+        else:
+            index += 1
+            if index == len(value):
+                raise ValueError(f"Line {number}: trailing property escape")
+            char = value[index]
+            if char == "u":
+                digits = value[index + 1:index + 5]
+                if not re.fullmatch(r"[0-9a-fA-F]{4}", digits):
+                    raise ValueError(f"Line {number}: malformed Unicode escape")
+                result.append(chr(int(digits, 16)))
+                index += 4
+            else:
+                # Java Properties removes the slash for non-special escapes too.
+                result.append(escapes.get(char, char))
+        index += 1
+    try:
+        decoded = "".join(result).encode("utf-16", "surrogatepass").decode("utf-16")
+    except UnicodeError as error:
+        raise ValueError(f"Line {number}: malformed Unicode escape") from error
+    if any(ord(char) < 32 for char in decoded):
+        raise ValueError(f"Line {number}: control characters cannot be imported")
+    return decoded
+
+
 def parse_import_properties(source: Path) -> dict[str, str]:
-    """Read the simple key=value format emitted by Minecraft without dropping entries."""
+    """Parse Java Properties syntax without silently dropping server settings."""
     values: dict[str, str] = {}
-    for number, line in enumerate(source.read_text(encoding="utf-8-sig").splitlines(), 1):
-        stripped = line.strip()
-        if not stripped or stripped.startswith(("#", "!")):
+    pending: str | None = None
+    start = 0
+    for number, raw in enumerate(source.read_text(encoding="utf-8-sig").splitlines(), 1):
+        if pending is None:
+            line = raw.lstrip(" \t\f")
+            if not line or line.startswith(("#", "!")):
+                continue
+            start = number
+        else:
+            line = pending + raw.lstrip(" \t\f")
+        if (len(line) - len(line.rstrip("\\"))) % 2:
+            pending = line[:-1]
             continue
-        if "=" not in line:
-            raise ValueError(f"Line {number}: expected key=value")
-        key, value = line.split("=", 1)
-        key = key.strip()
+        pending = None
+        separator = 0
+        while separator < len(line):
+            if line[separator] == "\\":
+                separator += 2
+            elif line[separator] in "=: \t\f":
+                break
+            else:
+                separator += 1
+        key = unescape_import_property(line[:separator], start)
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", key):
-            raise ValueError(f"Line {number}: unsupported property key: {key}")
-        if "\\" in key or "\\" in value:
-            raise ValueError(f"Line {number}: escaped properties are not supported")
-        values[key] = value
-    if values.get("level-name", "world") != "world":
-        raise ValueError("level-name must be world for this server layout")
+            raise ValueError(f"Line {start}: unsupported property key: {key}")
+        remainder = line[separator:].lstrip(" \t\f")
+        if remainder.startswith(("=", ":")):
+            remainder = remainder[1:]
+        values[key] = unescape_import_property(remainder.lstrip(" \t\f"), start)
+    if pending is not None:
+        raise ValueError(f"Line {start}: unfinished property continuation")
     if values.get("server-port", "25565") != "25565":
         raise ValueError("server-port must be 25565 for this server layout")
     return values
@@ -176,6 +225,7 @@ def import_properties(server_dir: Path, source: Path) -> Path | None:
     for env_key, property_key in PROPERTY_KEYS.items():
         if property_key in imported:
             values[env_key] = imported[property_key]
+    # create-server.sh stores the selected save at data/world; Compose sets LEVEL=world.
     known = set(PROPERTY_KEYS.values()) | {"level-name", "server-port"}
     extras = [f"{key}={value}" for key, value in imported.items() if key not in known]
     values["CUSTOM_SERVER_PROPERTIES"] = "\n".join(extras)
