@@ -146,7 +146,7 @@ run_and_show() {
 }
 
 server_action_menu() {
-  local id="$1" directory="$2" choice output
+  local id="$1" directory="$2" choice output confirmed delete_target
   while true; do
     choice="$(whiptail --title "$id" --menu "$(tr home.server_status "$(server_status "$directory")")" 23 78 13 \
       start "$(tr home.start)" \
@@ -158,6 +158,7 @@ server_action_menu() {
       properties "$(tr home.properties)" \
       open-data "$(tr home.open_data)" \
       open-server "$(tr home.open_server)" \
+      delete "$(tr home.delete_server)" \
       back "$(tr tui.back)" \
       3>&1 1>&2 2>&3)" || return
     case "$choice" in
@@ -186,6 +187,28 @@ server_action_menu() {
       down)
         if whiptail --yesno "$(tr home.down_confirm "$id")" 10 72; then
           run_and_show "$(tr home.down) · $id" "${SCRIPT_DIR}/server-manager.sh" server "$id" down
+        fi
+        ;;
+      delete)
+        delete_target="$(realpath -e -- "$directory")" || {
+          whiptail --title "$(tr common.error)" --msgbox "$(tr server.delete_unsafe "$directory")" 9 76
+          continue
+        }
+        if ! whiptail --title "$(tr home.delete_server)" \
+          --yesno "$(tr server.delete_summary "$id" "$delete_target")" 16 82; then
+          continue
+        fi
+        confirmed="$(whiptail --title "$(tr home.delete_server)" \
+          --inputbox "$(tr server.delete_id_prompt "$id")" 10 76 '' 3>&1 1>&2 2>&3)" || continue
+        if [[ "$confirmed" != "$id" ]]; then
+          whiptail --title "$(tr common.error)" --msgbox "$(tr server.delete_id_mismatch)" 9 72
+          continue
+        fi
+        run_and_show "$(tr home.delete_server) · $id" env \
+          MCSERVER_KIT_DELETE_CONFIRMED_ID="$id" \
+          "${SCRIPT_DIR}/server-manager.sh" server "$id" delete
+        if ((RUN_RESULT == 0)); then
+          return
         fi
         ;;
       back) return ;;

@@ -695,6 +695,147 @@ DOCKER
       MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" bash "${REPO_ROOT}/mcserver-kit" server ../alpha status
 }
 
+test_server_deletion() {
+  local temp_dir="$1"
+  local root="${temp_dir}/server-deletion/servers"
+  local outside="${temp_dir}/server-deletion/outside"
+  local config_file="${temp_dir}/server-deletion/config.yml"
+  local fake_bin="${temp_dir}/server-deletion/bin"
+  local docker_log="${temp_dir}/server-deletion/docker.log"
+  local id output
+
+  mkdir -p "$fake_bin" "$outside/data"
+  : >"${outside}/compose.yaml"
+  : >"${outside}/data/must-survive"
+  for id in cancelled mismatch down-failure deleted; do
+    mkdir -p "${root}/${id}/data"
+    : >"${root}/${id}/compose.yaml"
+    : >"${root}/${id}/data/world-data"
+    : >"${root}/${id}/server.env"
+  done
+  ln -s "$outside" "${root}/linked"
+  cat >"$config_file" <<CONFIG
+paths:
+  server_root: "$root"
+CONFIG
+  cat >"${fake_bin}/docker" <<'DOCKER'
+#!/usr/bin/env bash
+printf '%s|%s\n' "$PWD" "$*" >>"$MCSERVER_KIT_TEST_DOCKER_LOG"
+if [[ "$*" == 'compose down' && "${MCSERVER_KIT_TEST_DOWN_FAILURE:-false}" == true ]]; then
+  printf 'simulated compose down failure\n' >&2
+  exit 42
+fi
+DOCKER
+  chmod +x "${fake_bin}/docker"
+
+  output="$(printf 'n\n' | PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+    MCSERVER_KIT_CONFIG="$config_file" MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" \
+    bash "${REPO_ROOT}/mcserver-kit" server cancelled delete 2>&1)"
+  assert_equal 'present' "$([[ -d "${root}/cancelled" ]] && printf present)" 'first deletion confirmation can cancel without changing the server'
+  assert_equal 'present' "$(grep -Fq "Target: ${root}/cancelled" <<<"$output" && printf present)" 'deletion shows the exact absolute target path'
+
+  output="$(printf 'y\nwrong-id\n' | PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+    MCSERVER_KIT_CONFIG="$config_file" MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" \
+    bash "${REPO_ROOT}/mcserver-kit" server mismatch delete 2>&1)"
+  assert_equal 'present' "$([[ -d "${root}/mismatch" ]] && printf present)" 'a mismatched server ID preserves the server'
+  assert_equal 'present' "$(grep -q 'Nothing was deleted' <<<"$output" && printf present)" 'an ID mismatch reports that nothing was deleted'
+
+  assert_fails 'a symbolic-link server target is rejected before confirmation' \
+    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+      MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" bash "${REPO_ROOT}/mcserver-kit" server linked delete
+  assert_equal 'present' "$([[ -f "${outside}/data/must-survive" ]] && printf present)" 'rejecting a symbolic link preserves its external target'
+
+  tests_run=$((tests_run + 1))
+  if printf 'y\ndown-failure\n' | PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+    MCSERVER_KIT_CONFIG="$config_file" MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" \
+    MCSERVER_KIT_TEST_DOWN_FAILURE=true \
+    bash "${REPO_ROOT}/mcserver-kit" server down-failure delete >/dev/null 2>&1; then
+    printf 'FAIL: a compose down failure should abort permanent deletion\n' >&2
+    return 1
+  fi
+  assert_equal 'present' "$([[ -f "${root}/down-failure/data/world-data" ]] && printf present)" 'a compose down failure preserves the complete server folder'
+
+  output="$(printf 'y\ndeleted\n' | PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+    MCSERVER_KIT_CONFIG="$config_file" MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" \
+    bash "${REPO_ROOT}/mcserver-kit" server deleted delete 2>&1)"
+  assert_equal 'absent' "$([[ ! -e "${root}/deleted" ]] && printf absent)" 'two matching confirmations permanently delete the server folder'
+  assert_equal 'present' "$(grep -Fq "${root}/deleted|compose down" "$docker_log" && printf present)" 'containers are brought down before deleting the server folder'
+  assert_equal 'present' "$(grep -q 'Permanently deleted server deleted' <<<"$output" && printf present)" 'successful deletion reports the deleted server ID'
+}
+
+test_home_server_deletion() {
+  local temp_dir="$1"
+  local root="${temp_dir}/home-delete/servers"
+  local server_dir="${root}/alpha"
+  local config_file="${temp_dir}/home-delete/config.yml"
+  local fake_bin="${temp_dir}/home-delete/bin"
+  local menu_count="${temp_dir}/home-delete/menu-count"
+  local docker_log="${temp_dir}/home-delete/docker.log"
+  local dialog_log="${temp_dir}/home-delete/dialog.log"
+
+  mkdir -p "$fake_bin" "${server_dir}/data"
+  : >"${server_dir}/compose.yaml"
+  : >"${server_dir}/data/world-data"
+  cat >"$config_file" <<CONFIG
+paths:
+  server_root: "$root"
+CONFIG
+  cat >"${fake_bin}/docker" <<'DOCKER'
+#!/usr/bin/env bash
+printf '%s|%s\n' "$PWD" "$*" >>"$MCSERVER_KIT_TEST_DOCKER_LOG"
+if [[ "$*" == 'compose ps -a --format json' ]]; then
+  printf '[]\n'
+fi
+DOCKER
+  cat >"${fake_bin}/whiptail" <<'WHIPTAIL'
+#!/usr/bin/env bash
+case " $* " in
+  *' --menu '*)
+    count=0
+    [[ ! -f "$MCSERVER_KIT_TEST_MENU_COUNT" ]] || count="$(<"$MCSERVER_KIT_TEST_MENU_COUNT")"
+    count=$((count + 1))
+    printf '%s\n' "$count" >"$MCSERVER_KIT_TEST_MENU_COUNT"
+    case "$count" in
+      1) printf 'servers' >&2 ;;
+      2) printf 'alpha' >&2 ;;
+      3) printf 'delete' >&2 ;;
+      4) printf '__back' >&2 ;;
+      *) printf 'exit' >&2 ;;
+    esac
+    ;;
+  *' --yesno '*)
+    printf 'first-confirmation|%s\n' "$*" >>"$MCSERVER_KIT_TEST_DIALOG_LOG"
+    exit 0
+    ;;
+  *' --inputbox '*)
+    printf 'second-confirmation|%s\n' "$*" >>"$MCSERVER_KIT_TEST_DIALOG_LOG"
+    printf 'alpha' >&2
+    ;;
+  *' --textbox '*)
+    while (($#)); do
+      if [[ "$1" == --textbox ]]; then
+        shift
+        printf 'result|%s\n' "$(<"$1")" >>"$MCSERVER_KIT_TEST_DIALOG_LOG"
+        break
+      fi
+      shift
+    done
+    ;;
+esac
+WHIPTAIL
+  chmod +x "${fake_bin}/docker" "${fake_bin}/whiptail"
+
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_TUI_TEST=true MCSERVER_KIT_TEST_MENU_COUNT="$menu_count" \
+    MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" MCSERVER_KIT_TEST_DIALOG_LOG="$dialog_log" \
+    bash "${REPO_ROOT}/mcserver-kit" home
+
+  assert_equal 'absent' "$([[ ! -e "$server_dir" ]] && printf absent)" 'the TUI permanently deletes a server after both confirmations'
+  assert_equal 'present' "$(grep -Fq "Target: ${server_dir}" "$dialog_log" && printf present)" 'the TUI first confirmation shows the absolute deletion target'
+  assert_equal 'present' "$(grep -Fq "Type the server ID 'alpha'" "$dialog_log" && printf present)" 'the TUI requires the exact server ID as its second confirmation'
+  assert_equal 'present' "$(grep -Fq "${server_dir}|compose down" "$docker_log" && printf present)" 'the TUI brings containers down before deleting the server folder'
+}
+
 test_server_property_editor() {
   local temp_dir="$1"
   local server_dir="${temp_dir}/property-editor/server"
@@ -970,6 +1111,8 @@ main() {
   test_config_value_editor "$TEST_TEMP_DIR"
   test_compose_state_parser
   test_server_management "$TEST_TEMP_DIR"
+  test_server_deletion "$TEST_TEMP_DIR"
+  test_home_server_deletion "$TEST_TEMP_DIR"
   test_server_property_editor "$TEST_TEMP_DIR"
   test_property_import_and_explorer "$TEST_TEMP_DIR"
   test_home_dashboard "$TEST_TEMP_DIR"

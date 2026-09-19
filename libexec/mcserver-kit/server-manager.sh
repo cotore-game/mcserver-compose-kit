@@ -52,6 +52,25 @@ resolve_server_dir() {
   printf '%s' "${root}/${id}"
 }
 
+resolve_deletion_target() {
+  local id="$1" root root_real candidate candidate_real parent_real
+  validate_server_id "$id"
+  root="$(server_root)"
+  [[ -d "$root" ]] || die "$(tr server.delete_unsafe "$root")"
+  root_real="$(realpath -e -- "$root")" || die "$(tr server.delete_unsafe "$root")"
+  [[ "$root_real" != / && "$root_real" != "$HOME" ]] || die "$(tr server.delete_unsafe "$root_real")"
+
+  candidate="${root_real}/${id}"
+  [[ -d "$candidate" && ! -L "$candidate" ]] || die "$(tr server.delete_unsafe "$candidate")"
+  candidate_real="$(realpath -e -- "$candidate")" || die "$(tr server.delete_unsafe "$candidate")"
+  parent_real="$(dirname -- "$candidate_real")"
+  [[ "$parent_real" == "$root_real" && "$candidate_real" == "${root_real}/${id}" ]] ||
+    die "$(tr server.delete_unsafe "$candidate_real")"
+  [[ -f "${candidate_real}/compose.yaml" && ! -L "${candidate_real}/compose.yaml" ]] ||
+    die "$(tr server.delete_unsafe "$candidate_real")"
+  printf '%s' "$candidate_real"
+}
+
 list_servers() {
   local root
   local directory
@@ -163,12 +182,48 @@ open_folder() {
   die "$(tr server.explorer_unavailable)"
 }
 
+confirm_server_deletion() {
+  local id="$1" directory="$2" answer typed
+  printf '%s\n' "$(tr server.delete_summary "$id" "$directory")"
+  IFS= read -r -p "$(tr server.delete_confirm)" answer || answer=''
+  case "$answer" in
+    y | Y | yes | YES) ;;
+    *) tr server.delete_cancelled; return 1 ;;
+  esac
+  IFS= read -r -p "$(tr server.delete_id_prompt "$id")" typed || typed=''
+  if [[ "$typed" != "$id" ]]; then
+    tr server.delete_id_mismatch
+    return 1
+  fi
+}
+
+delete_server() {
+  local id="$1" directory="$2"
+  if [[ "${MCSERVER_KIT_DELETE_CONFIRMED_ID:-}" != "$id" ]]; then
+    confirm_server_deletion "$id" "$directory" || return 0
+  fi
+
+  # Resolve again immediately before each destructive step. This rejects
+  # symlinks and anything outside the configured server root.
+  directory="$(resolve_deletion_target "$id")"
+  printf '%s\n' "$(tr server.delete_down "$id")"
+  compose_in "$directory" down || die "$(tr server.delete_down_failed)"
+  directory="$(resolve_deletion_target "$id")"
+  rm -rf -- "$directory" || die "$(tr server.delete_failed "$directory")"
+  [[ ! -e "$directory" ]] || die "$(tr server.delete_failed "$directory")"
+  printf '%s\n' "$(tr server.delete_done "$id" "$directory")"
+}
+
 manage_server() {
   local id="${1-}"
   local action="${2-}"
   local directory
   [[ -n "$id" && -n "$action" ]] || die "$(tr server.usage)"
-  directory="$(resolve_server_dir "$id")"
+  if [[ "$action" == delete ]]; then
+    directory="$(resolve_deletion_target "$id")"
+  else
+    directory="$(resolve_server_dir "$id")"
+  fi
   shift 2
 
   case "$action" in
@@ -227,6 +282,10 @@ manage_server() {
     down)
       printf '%s\n' "$(tr server.down "$id")"
       compose_in "$directory" down
+      ;;
+    delete)
+      [[ $# -eq 0 ]] || die "$(tr server.delete_usage)"
+      delete_server "$id" "$directory"
       ;;
     properties)
       exec "${SCRIPT_DIR}/server-properties-tui.sh" "$id" "$directory"

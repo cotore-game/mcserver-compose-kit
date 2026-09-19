@@ -168,6 +168,7 @@ mcserver-kit server <server-id> status
 mcserver-kit server <server-id> logs
 mcserver-kit server <server-id> logs --no-follow
 mcserver-kit server <server-id> down
+mcserver-kit server <server-id> delete
 mcserver-kit server <server-id> properties
 mcserver-kit server <server-id> import-properties /path/to/server.properties
 mcserver-kit server <server-id> open data
@@ -175,6 +176,8 @@ mcserver-kit server <server-id> open server
 ```
 
 `stop` and `shutdown` stop the container without removing it. `down` removes the container and network. These commands do not delete the server's `data/` directory.
+
+`delete` permanently removes the whole managed server folder, including its world data, settings, secrets, and backups. It displays the absolute target path, asks whether to continue, and then requires the exact server ID as a second confirmation. Containers and networks are removed first; if `docker compose down` fails, the server folder is preserved.
 
 ## Edit Minecraft settings
 

@@ -169,6 +169,7 @@ mcserver-kit server <server-id> status
 mcserver-kit server <server-id> logs
 mcserver-kit server <server-id> logs --no-follow
 mcserver-kit server <server-id> down
+mcserver-kit server <server-id> delete
 mcserver-kit server <server-id> properties
 mcserver-kit server <server-id> import-properties /path/to/server.properties
 mcserver-kit server <server-id> open data
@@ -176,6 +177,8 @@ mcserver-kit server <server-id> open server
 ```
 
 `stop`と`shutdown`はコンテナを削除せず停止します。`down`はコンテナとネットワークを削除します。いずれもサーバーの`data/`は削除しません。
+
+`delete`は、ワールドデータ、設定、シークレット、バックアップを含む管理対象サーバーフォルダ全体を完全に削除します。対象の絶対パスを表示して続行確認を行い、二段階目として正確なサーバーIDの入力を要求します。先にコンテナとネットワークを削除し、`docker compose down`が失敗した場合はサーバーフォルダを削除しません。
 
 ## Minecraft設定を編集する
 
