@@ -260,15 +260,20 @@ import_properties() {
 }
 
 main() {
-  local selected
+  local selected source_mode
   local items
   command -v whiptail >/dev/null 2>&1 || die "$(tr properties.whiptail_missing)"
   [[ -f "${SERVER_DIR}/compose.yaml" ]] || die "$(tr server.compose_missing "$SERVER_ID")"
 
   if [[ ! -f "$SERVER_ENV" ]]; then
     whiptail --yesno "$(tr properties.migration_prompt)" 11 76 || return 0
+    run_checked python3 "$CONFIG_TOOL" migrate "$SERVER_DIR"
+  else
+    source_mode="$(python3 "$CONFIG_TOOL" source-mode "$SERVER_DIR")" || die "$(tr properties.source_check_failed)"
+    if [[ "$source_mode" == environment ]]; then
+      run_checked python3 "$CONFIG_TOOL" migrate "$SERVER_DIR"
+    fi
   fi
-  run_checked python3 "$CONFIG_TOOL" migrate "$SERVER_DIR"
   if [[ "$(python3 "$CONFIG_TOOL" get "$SERVER_ENV" OVERRIDE_SERVER_PROPERTIES true)" == false ]]; then
     [[ -f "$SERVER_PROPERTIES" ]] || die "$(tr properties.file_missing)"
     local running

@@ -695,6 +695,138 @@ DOCKER
       MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" bash "${REPO_ROOT}/mcserver-kit" server ../alpha status
 }
 
+test_properties_source_migration_and_cli() {
+  local temp_dir="$1"
+  local root="${temp_dir}/properties-source/servers"
+  local server_dir="${root}/alpha"
+  local config_file="${temp_dir}/properties-source/config.yml"
+  local fake_bin="${temp_dir}/properties-source/bin"
+  local import_dir="${temp_dir}/properties-source/import"
+  local properties="${server_dir}/data/server.properties"
+  local output backup_id
+
+  mkdir -p "$fake_bin" "$import_dir" "${server_dir}/data/world"
+  cat >"$config_file" <<CONFIG
+paths:
+  server_root: "$root"
+CONFIG
+  cat >"${server_dir}/.env" <<'ENV'
+MC_VERSION="26.3"
+MC_MEMORY="8G"
+ENV
+  cat >"${server_dir}/server.env" <<'ENV'
+MOTD="Environment MOTD"
+DIFFICULTY="hard"
+WHITELIST="Alice"
+EXISTING_WHITELIST_FILE="SYNC_FILE_MERGE_LIST"
+OPS="Admin"
+EXISTING_OPS_FILE="SYNC_FILE_MERGE_LIST"
+CUSTOM_SERVER_PROPERTIES="plugin.option=enabled"
+OVERRIDE_SERVER_PROPERTIES="true"
+ENV
+  cat >"${server_dir}/compose.yaml" <<'COMPOSE'
+services:
+  minecraft:
+    image: itzg/minecraft-server:latest
+    env_file:
+      - server.env
+    environment:
+      EULA: "TRUE"
+      VERSION: "${MC_VERSION}"
+      MEMORY: "${MC_MEMORY}"
+      LEVEL: "world"
+      PVP: "false"
+    volumes:
+      - ./data:/data
+COMPOSE
+  cat >"$properties" <<'PROPERTIES'
+# Keep this operator comment
+motd=Old MOTD
+difficulty=easy
+pvp=true
+level-name=world
+server-port=25565
+PROPERTIES
+  cat >"${fake_bin}/docker" <<'DOCKER'
+#!/usr/bin/env bash
+if [[ "$*" == 'compose ps --status running --services' && "${MCSERVER_KIT_TEST_RUNNING:-false}" == true ]]; then
+  printf 'minecraft\n'
+fi
+exit 0
+DOCKER
+  chmod +x "${fake_bin}/docker"
+
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties migrate)"
+  assert_equal 'present' "$(grep -q 'is now the source of truth' <<<"$output" && printf present)" 'migration reports the source-of-truth switch'
+  assert_equal 'properties' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" source-mode "$server_dir")" 'migration marks server.properties as authoritative'
+  assert_equal 'Environment MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" motd)" 'migration applies the effective environment MOTD'
+  assert_equal 'hard' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" difficulty)" 'migration applies managed environment properties'
+  assert_equal 'false' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" pvp)" 'migration applies direct Compose property overrides'
+  assert_equal 'enabled' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" plugin.option)" 'migration preserves custom properties'
+  assert_equal 'present' "$(grep -q '^# Keep this operator comment$' "$properties" && printf present)" 'migration preserves existing comments'
+  assert_equal 'absent' "$(! grep -q '^MOTD=' "${server_dir}/server.env" && printf absent)" 'migration removes duplicated property variables from server.env'
+  assert_equal 'Alice' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" WHITELIST)" 'migration retains non-property whitelist membership management'
+  assert_equal 'absent' "$(! grep -q '^      PVP:' "${server_dir}/compose.yaml" && printf absent)" 'migration removes direct Compose property overrides'
+  assert_equal 'present' "$(find "${server_dir}/backups/source-migrations" -name server.env -type f -print -quit | grep -q . && printf present)" 'migration backs up the previous server.env'
+  assert_equal 'present' "$(find "${server_dir}/backups/source-migrations" -name server.properties -type f -print -quit | grep -q . && printf present)" 'migration backs up the previous server.properties'
+  cat >"${fake_bin}/whiptail" <<'WHIPTAIL'
+#!/usr/bin/env bash
+case " $* " in
+  *' --menu '*) printf '__exit' >&2 ;;
+  *' --yesno '*) exit 1 ;;
+esac
+WHIPTAIL
+  chmod +x "${fake_bin}/whiptail"
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/server-properties-tui.sh" alpha "$server_dir"
+  assert_equal 'absent' "$(! grep -q '^MOTD=' "${server_dir}/server.env" && printf absent)" 'opening the TUI does not recreate property variables after migration'
+
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties list)"
+  assert_equal 'present' "$(grep -q '^plugin.option=enabled$' <<<"$output" && printf present)" 'the CLI lists arbitrary properties'
+  assert_equal 'Environment MOTD' "$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties get motd)" 'the CLI reads a property by its Minecraft key'
+  assert_fails 'the CLI rejects a level-name outside the managed data/world layout' \
+    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+      bash "${REPO_ROOT}/mcserver-kit" server alpha properties set level-name OtherWorld
+  assert_equal 'world' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" level-name)" 'a rejected world path does not alter server.properties'
+
+  assert_fails 'property mutation is refused while the server is running' \
+    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+      MCSERVER_KIT_TEST_RUNNING=true bash "${REPO_ROOT}/mcserver-kit" server alpha properties set motd unsafe
+  assert_equal 'Environment MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" motd)" 'a refused running-server edit leaves properties unchanged'
+
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties backup >/dev/null
+  backup_id="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties backups | head -n 1)"
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties set motd 'Changed MOTD' >/dev/null
+  assert_equal 'Changed MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" motd)" 'the CLI edits the authoritative file directly'
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties add mod.custom 'custom value' >/dev/null
+  assert_equal 'custom value' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" mod.custom)" 'the CLI adds unknown mod properties'
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties remove mod.custom >/dev/null
+  assert_equal 'absent' "$(! grep -q '^mod.custom=' "$properties" && printf absent)" 'the CLI removes arbitrary properties'
+  cat >"${import_dir}/server.properties" <<'PROPERTIES'
+motd=Imported MOTD
+level-name=DistributedWorld
+server-port=25565
+plugin.imported=true
+PROPERTIES
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties import "${import_dir}/server.properties")"
+  assert_equal 'present' "$(grep -q 'remains the source of truth' <<<"$output" && printf present)" 'direct import reports the authoritative properties file'
+  assert_equal 'Imported MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" motd)" 'direct import replaces properties content'
+  assert_equal 'world' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" level-name)" 'direct import retains the managed data/world layout'
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties restore "$backup_id" >/dev/null
+  assert_equal 'Environment MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" motd)" 'restore replaces the file with the selected snapshot'
+  assert_equal 'present' "$(find "${server_dir}/backups/server-properties" -name '*-before-restore.properties' -print -quit | grep -q . && printf present)" 'restore first backs up the file it replaces'
+}
+
 test_server_property_editor() {
   local temp_dir="$1"
   local server_dir="${temp_dir}/property-editor/server"
@@ -970,6 +1102,7 @@ main() {
   test_config_value_editor "$TEST_TEMP_DIR"
   test_compose_state_parser
   test_server_management "$TEST_TEMP_DIR"
+  test_properties_source_migration_and_cli "$TEST_TEMP_DIR"
   test_server_property_editor "$TEST_TEMP_DIR"
   test_property_import_and_explorer "$TEST_TEMP_DIR"
   test_home_dashboard "$TEST_TEMP_DIR"

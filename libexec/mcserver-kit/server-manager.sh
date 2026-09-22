@@ -125,7 +125,7 @@ choose_properties_file() {
 }
 
 import_properties() {
-  local directory="$1" source="${2-}" backup
+  local directory="$1" source="${2-}" backup mode
   require_stopped "$directory"
   if [[ -z "$source" ]]; then
     source="$(choose_properties_file)" || return 0
@@ -136,7 +136,12 @@ import_properties() {
   backup="$(python3 "$CONFIG_TOOL" import-properties "$directory" "$source")" || die "$(tr server.import_failed)"
   compose_in "$directory" config --quiet || die "$(tr properties.compose_invalid)"
   [[ -z "$backup" ]] || printf '%s\n' "$(tr server.import_backup "$backup")"
-  printf '%s\n' "$(tr server.import_done "${directory}/server.env")"
+  mode="$(python3 "$CONFIG_TOOL" source-mode "$directory")"
+  if [[ "$mode" == properties ]]; then
+    printf '%s\n' "$(tr server.import_done_properties "${directory}/data/server.properties")"
+  else
+    printf '%s\n' "$(tr server.import_done "${directory}/server.env")"
+  fi
 }
 
 open_folder() {
@@ -161,6 +166,84 @@ open_folder() {
   [[ "$status" == 1 && -z "$output" ]] && return 0
   [[ -z "$output" ]] || printf '%s\n' "$output" >&2
   die "$(tr server.explorer_unavailable)"
+}
+
+require_properties_source() {
+  local directory="$1" mode
+  mode="$(python3 "$CONFIG_TOOL" source-mode "$directory")" || die "$(tr properties.source_check_failed)"
+  [[ "$mode" == properties ]] || die "$(tr properties.migrate_first)"
+}
+
+manage_properties() {
+  local id="$1" directory="$2" command="${3-}" properties backup
+  properties="${directory}/data/server.properties"
+  case "$command" in
+    '') exec "${SCRIPT_DIR}/server-properties-tui.sh" "$id" "$directory" ;;
+    migrate)
+      [[ $# -eq 3 ]] || die "$(tr properties.cli_usage)"
+      require_stopped "$directory"
+      backup="$(python3 "$CONFIG_TOOL" migrate-to-properties "$directory")" ||
+        die "$(tr properties.migration_failed)"
+      compose_in "$directory" config --quiet || die "$(tr properties.compose_invalid)"
+      printf '%s\n' "$(tr properties.migration_done "$backup")"
+      ;;
+    list)
+      [[ $# -eq 3 ]] || die "$(tr properties.cli_usage)"
+      require_properties_source "$directory"
+      python3 "$CONFIG_TOOL" property-list "$properties"
+      ;;
+    get)
+      [[ $# -eq 4 ]] || die "$(tr properties.cli_usage)"
+      require_properties_source "$directory"
+      python3 "$CONFIG_TOOL" property-key-get "$properties" "$4"
+      ;;
+    set | add)
+      [[ $# -eq 5 ]] || die "$(tr properties.cli_usage)"
+      require_properties_source "$directory"
+      require_stopped "$directory"
+      python3 "$CONFIG_TOOL" property-backup "$directory" >/dev/null
+      python3 "$CONFIG_TOOL" property-key-set "$properties" "$4" "$5"
+      printf '%s\n' "$(tr properties.cli_saved "$4")"
+      ;;
+    remove)
+      [[ $# -eq 4 ]] || die "$(tr properties.cli_usage)"
+      require_properties_source "$directory"
+      require_stopped "$directory"
+      python3 "$CONFIG_TOOL" property-backup "$directory" >/dev/null
+      if python3 "$CONFIG_TOOL" property-key-remove "$properties" "$4"; then
+        printf '%s\n' "$(tr properties.cli_removed "$4")"
+      else
+        [[ $? -eq 3 ]] && die "$(tr properties.cli_missing_key "$4")"
+        return 1
+      fi
+      ;;
+    import)
+      [[ $# -eq 4 ]] || die "$(tr properties.cli_usage)"
+      require_properties_source "$directory"
+      import_properties "$directory" "$4"
+      ;;
+    backup)
+      [[ $# -eq 3 ]] || die "$(tr properties.cli_usage)"
+      require_properties_source "$directory"
+      require_stopped "$directory"
+      backup="$(python3 "$CONFIG_TOOL" property-backup "$directory")" || die "$(tr properties.backup_failed)"
+      printf '%s\n' "$(tr properties.backup_done "$backup")"
+      ;;
+    backups)
+      [[ $# -eq 3 ]] || die "$(tr properties.cli_usage)"
+      require_properties_source "$directory"
+      python3 "$CONFIG_TOOL" property-backups "$directory"
+      ;;
+    restore)
+      [[ $# -eq 4 ]] || die "$(tr properties.cli_usage)"
+      require_properties_source "$directory"
+      require_stopped "$directory"
+      backup="$(python3 "$CONFIG_TOOL" property-restore "$directory" "$4")" ||
+        die "$(tr properties.restore_failed)"
+      printf '%s\n' "$(tr properties.restore_done "$4" "$backup")"
+      ;;
+    *) die "$(tr properties.cli_usage)" ;;
+  esac
 }
 
 manage_server() {
@@ -229,7 +312,7 @@ manage_server() {
       compose_in "$directory" down
       ;;
     properties)
-      exec "${SCRIPT_DIR}/server-properties-tui.sh" "$id" "$directory"
+      manage_properties "$id" "$directory" "$@"
       ;;
     import-properties)
       [[ $# -le 1 ]] || die "$(tr server.import_usage)"
