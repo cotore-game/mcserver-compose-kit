@@ -189,7 +189,29 @@ MOTD、難易度、ゲームモード、最大人数、オンラインモード�
 
 通常、ツールが管理する設定の正本は各サーバーの`server.env`です。Docker Composeが値を`itzg/minecraft-server`へ渡し、コンテナ起動時に`server.properties`へ反映します。
 
-配布された`server.properties`を使う場合は、サーバーを停止して「サーバー設定 → server.propertiesをインポート」を選ぶか、`mcserver-kit server <server-id> import-properties /path/to/server.properties`を実行します。Windowsダイアログを有効にしているWSL環境では、設定画面からWindowsのファイル選択画面を開けます。既存のデータファイルは置換前にバックアップします。対応する項目を`server.env`へ取り込み、その他のキーは`CUSTOM_SERVER_PROPERTIES`へ保存します。設定の正本は引き続き`server.env`で、元ファイルも`data/server.properties`へコピーします。`\:`などJava Propertiesのエスケープを解釈します。配布ファイルの`level-name`が異なっても、ワールドの配置は`data/world`、Composeの設定は`LEVEL=world`のままです。ポートが異なる場合や書式が不正な場合は変更前にエラーにします。サーバー起動中にファイルを直接編集しないでください。
+既存サーバーは、`data/server.properties`を正本とする方式へ移行できます。先にサーバーを停止し、次を実行します。
+
+```bash
+mcserver-kit server <サーバーID> properties migrate
+```
+
+移行時は`server.env`、`CUSTOM_SERVER_PROPERTIES`、Compose、既存ファイルの実効値を引き継ぎます。変更前のファイルは`backups/source-migrations/`へ保存し、itzgによるプロパティ上書きを無効化します。ホワイトリストとOPのメンバー管理はプロパティと分離して保持します。移行後は、MinecraftやMODの元のキー名で全項目をCLI操作できます。
+
+```bash
+mcserver-kit server <サーバーID> properties list
+mcserver-kit server <サーバーID> properties get motd
+mcserver-kit server <サーバーID> properties set motd "My server"
+mcserver-kit server <サーバーID> properties add mod.custom-key value
+mcserver-kit server <サーバーID> properties remove mod.custom-key
+mcserver-kit server <サーバーID> properties backup
+mcserver-kit server <サーバーID> properties backups
+mcserver-kit server <サーバーID> properties restore <バックアップID>
+mcserver-kit server <サーバーID> properties import /path/to/server.properties
+```
+
+変更を伴うコマンドはサーバーの停止を要求し、変更前にスナップショットを作成します。バックアップは`backups/server-properties/`へ保存します。復元時にも、置換される現在のファイルを先にバックアップします。
+
+未移行のサーバーで配布された`server.properties`を使う場合は、サーバーを停止して「サーバー設定 → server.propertiesをインポート」を選ぶか、`mcserver-kit server <server-id> import-properties /path/to/server.properties`を実行します。Windowsダイアログを有効にしているWSL環境では、設定画面からWindowsのファイル選択画面を開けます。既存のデータファイルは置換前にバックアップします。対応する項目を`server.env`へ取り込み、その他のキーは`CUSTOM_SERVER_PROPERTIES`へ保存します。設定の正本は引き続き`server.env`で、元ファイルも`data/server.properties`へコピーします。`\:`などJava Propertiesのエスケープを解釈します。配布ファイルの`level-name`が異なっても、ワールドの配置は`data/world`、Composeの設定は`LEVEL=world`のままです。ポートが異なる場合や書式が不正な場合は変更前にエラーにします。サーバー起動中にファイルを直接編集しないでください。
 
 ホーム画面からサーバーフォルダ、または永続データの`data/`をWindowsのExplorerで開けます。コマンドでは`mcserver-kit server <server-id> open server`または`open data`です。WSLとExplorerの連携が必要です。
 

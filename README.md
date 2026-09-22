@@ -188,7 +188,29 @@ The editor covers MOTD, difficulty, game mode, player limit, online mode, whitel
 
 Normally, `server.env` is the source of truth for settings managed by the toolkit. Docker Compose passes these values to `itzg/minecraft-server`, which applies them to `server.properties` when the container starts.
 
-For a distributed `server.properties`, stop the server and choose **Server settings → Import server.properties**, or run `mcserver-kit server <server-id> import-properties /path/to/server.properties`. On WSL, the settings screen offers a Windows file picker when Windows dialogs are enabled. The existing data file is backed up before replacement. Supported properties are imported into `server.env`; additional keys are stored in `CUSTOM_SERVER_PROPERTIES`. `server.env` remains the source of truth, and the imported file is also copied to `data/server.properties`. Java Properties escapes such as `\:` are decoded. If the distributed `level-name` differs, the toolkit keeps its existing `data/world` layout and Compose's `LEVEL=world` setting. A nonstandard server port or malformed property is rejected before changing the server. Do not edit the file while the server is running.
+An existing server can be migrated so that `data/server.properties` becomes the source of truth. Stop the server first, then run:
+
+```bash
+mcserver-kit server <server-id> properties migrate
+```
+
+The migration preserves the effective values from `server.env`, `CUSTOM_SERVER_PROPERTIES`, Compose, and the existing file. It stores the previous files under `backups/source-migrations/`, disables itzg property overrides, and keeps whitelist and operator membership settings separate. The CLI can then manage every Minecraft or mod property by its original key:
+
+```bash
+mcserver-kit server <server-id> properties list
+mcserver-kit server <server-id> properties get motd
+mcserver-kit server <server-id> properties set motd "My server"
+mcserver-kit server <server-id> properties add mod.custom-key value
+mcserver-kit server <server-id> properties remove mod.custom-key
+mcserver-kit server <server-id> properties backup
+mcserver-kit server <server-id> properties backups
+mcserver-kit server <server-id> properties restore <backup-id>
+mcserver-kit server <server-id> properties import /path/to/server.properties
+```
+
+Mutating commands require the server to be stopped and create a snapshot before changing the file. Backups are stored under `backups/server-properties/`. A restore also backs up the file it replaces.
+
+For an unmigrated server using a distributed `server.properties`, stop the server and choose **Server settings → Import server.properties**, or run `mcserver-kit server <server-id> import-properties /path/to/server.properties`. On WSL, the settings screen offers a Windows file picker when Windows dialogs are enabled. The existing data file is backed up before replacement. Supported properties are imported into `server.env`; additional keys are stored in `CUSTOM_SERVER_PROPERTIES`. `server.env` remains the source of truth, and the imported file is also copied to `data/server.properties`. Java Properties escapes such as `\:` are decoded. If the distributed `level-name` differs, the toolkit keeps its existing `data/world` layout and Compose's `LEVEL=world` setting. A nonstandard server port or malformed property is rejected before changing the server. Do not edit the file while the server is running.
 
 The dashboard can also open the server folder or its persistent `data/` folder in Windows Explorer. From a terminal, use `mcserver-kit server <server-id> open server` or `open data`. This requires WSL interop with Explorer.
 
