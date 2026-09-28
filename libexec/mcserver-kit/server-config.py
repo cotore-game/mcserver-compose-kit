@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import shutil
 import sys
 import tempfile
@@ -86,15 +87,60 @@ def decode(value: str) -> str:
     return value
 
 
-def read_env(path: Path) -> dict[str, str]:
+def parse_env(contents: str) -> dict[str, str]:
     values: dict[str, str] = {}
-    if not path.is_file():
-        return values
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in contents.splitlines():
         match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", line)
         if match:
             values[match.group(1)] = decode(match.group(2))
     return values
+
+
+def read_env(path: Path) -> dict[str, str]:
+    return parse_env(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+
+def initialize_properties(server_dir: Path, contents: str) -> None:
+    """Split creation answers into Minecraft properties and container settings."""
+    properties = server_dir / "data" / "server.properties"
+    environment = server_dir / "server.env"
+    if properties.exists() or environment.exists():
+        raise ValueError("Refusing to overwrite existing server settings")
+    values = parse_env(contents)
+    entries = {
+        PROPERTY_KEYS[key]: value for key, value in values.items() if key in PROPERTY_KEYS
+    }
+    entries.update({
+        "level-name": "world", "server-port": "25565",
+        "enable-rcon": "true", "rcon.port": "25575",
+        "rcon.password": secrets.token_hex(24),
+    })
+    rendered = "#Minecraft server properties\n" + "".join(
+        f"{key}={escape_property_value(value)}\n" for key, value in entries.items()
+    )
+    retained = {key: value for key, value in values.items() if key not in PROPERTY_KEYS}
+    retained["OVERRIDE_SERVER_PROPERTIES"] = "false"
+    retained.update(rcon_environment(entries))
+    properties.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(properties, rendered, 0o644)
+    write_env(environment, retained)
+
+
+def rcon_environment(properties: dict[str, str]) -> dict[str, str]:
+    """Derived client settings: Minecraft properties remain authoritative."""
+    return {
+        "ENABLE_RCON": properties.get("enable-rcon", "false"),
+        "RCON_PORT": properties.get("rcon.port", "25575"),
+        "RCON_PASSWORD": properties.get("rcon.password", ""),
+    }
+
+
+def sync_rcon_environment(properties_path: Path) -> None:
+    environment = properties_path.parent.parent / "server.env"
+    values = read_env(environment)
+    if values.get("OVERRIDE_SERVER_PROPERTIES", "true").lower() == "false":
+        values.update(rcon_environment(parse_import_properties(properties_path)))
+        write_env(environment, values)
 
 
 def write_env(path: Path, values: dict[str, str]) -> None:
@@ -184,6 +230,8 @@ def set_property_key(path: Path, property_key: str, value: str) -> None:
             lines[-1] += "\n"
         lines.append(replacement)
     atomic_write(path, "".join(lines))
+    if path.name == "server.properties":
+        sync_rcon_environment(path)
 
 
 def set_property(path: Path, env_key: str, value: str) -> None:
@@ -199,6 +247,8 @@ def remove_property_key(path: Path, property_key: str) -> bool:
     for start, end, _ in reversed(spans):
         del lines[start:end]
     atomic_write(path, "".join(lines))
+    if path.name == "server.properties":
+        sync_rcon_environment(path)
     return True
 
 
@@ -246,6 +296,7 @@ def restore_properties_backup(server_dir: Path, backup_id: str) -> Path:
             shutil.copyfileobj(input_file, output)
         os.chmod(temporary_name, 0o644)
         os.replace(temporary_name, destination)
+        sync_rcon_environment(destination)
     finally:
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
@@ -354,6 +405,7 @@ def import_properties(server_dir: Path, source: Path) -> Path | None:
             set_property_key(Path(temporary_name), "server-port", "25565")
             os.chmod(temporary_name, 0o644)
             os.replace(temporary_name, destination)
+            sync_rcon_environment(destination)
         finally:
             if os.path.exists(temporary_name):
                 os.unlink(temporary_name)
@@ -579,6 +631,9 @@ def migrate(server_dir: Path) -> None:
     target = server_dir / "server.env"
     dotenv = read_env(server_dir / ".env")
     existing = read_env(target)
+    # Legacy UI/import entry points must not recreate property overrides.
+    if existing.get("OVERRIDE_SERVER_PROPERTIES", "true").lower() == "false":
+        return
     compose_values = compose_environment(compose, dotenv)
     properties = read_properties(server_dir / "data" / "server.properties")
     backup = server_dir / "compose.yaml.mcserver-kit.bak"
@@ -607,6 +662,13 @@ def main() -> int:
         return 2
     operation = sys.argv[1]
     target = Path(sys.argv[2])
+    if operation == "initialize-properties" and len(sys.argv) == 3:
+        try:
+            initialize_properties(target, sys.stdin.read())
+        except (OSError, ValueError, UnicodeError) as error:
+            print(f"Could not initialize server properties: {error}", file=sys.stderr)
+            return 1
+        return 0
     if operation == "migrate" and len(sys.argv) == 3:
         migrate(target)
         return 0
@@ -642,7 +704,7 @@ def main() -> int:
         if key is None:
             return 2
         default = sys.argv[4] if len(sys.argv) == 5 else ""
-        print(read_properties(target).get(key, default))
+        print(parse_import_properties(target).get(key, default))
         return 0
     if operation == "property-set" and len(sys.argv) == 5:
         if sys.argv[3] not in PROPERTY_KEYS:

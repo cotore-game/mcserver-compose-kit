@@ -187,7 +187,7 @@ mcserver-kit server <server-id> properties
 
 MOTD、難易度、ゲームモード、最大人数、オンラインモード、ホワイトリスト、OP、飛行、コマンドブロック、PvP、描画・シミュレーション距離、スポーン保護、ネザー、Mob/NPC生成、リソースパックなどを編集できます。
 
-通常、ツールが管理する設定の正本は各サーバーの`server.env`です。Docker Composeが値を`itzg/minecraft-server`へ渡し、コンテナ起動時に`server.properties`へ反映します。
+新規サーバーは初回起動前の作成時点から`data/server.properties`を正本として使います。`server.env`にはホワイトリスト・OPのメンバー管理設定を残し、`OVERRIDE_SERVER_PROPERTIES=false`でitzgによるプロパティ上書きを止めます。バージョン・メモリ等のコンテナ設定は`.env`とComposeで管理します。既存サーバーは明示的に移行するまで従来の設定方式を維持します。
 
 既存サーバーは、`data/server.properties`を正本とする方式へ移行できます。先にサーバーを停止し、次を実行します。
 
@@ -210,6 +210,10 @@ mcserver-kit server <サーバーID> properties import /path/to/server.propertie
 ```
 
 変更を伴うコマンドはサーバーの停止を要求し、変更前にスナップショットを作成します。バックアップは`backups/server-properties/`へ保存します。復元時にも、置換される現在のファイルを先にバックアップします。
+
+新規作成・移行済みのサーバーでは、インポートは`data/server.properties`を置換し、正本の管理方式を維持します。ワールド配置とポートの制約として`level-name=world`、`server-port=25565`を保持します。既存TUIの対応項目はこのファイルを直接編集します。任意キーの一覧・説明付きTUIは今後追加する予定です。
+
+新規作成時はランダムなRCONパスワードも生成します。`server.env`の`ENABLE_RCON`・`RCON_PORT`・`RCON_PASSWORD`は、プロパティから生成するitzg側クライアント用の値です。RCONの変更にはプロパティ操作コマンドを使ってください。編集・インポート・復元時にこれらの値も更新します。変更した環境変数は`docker compose up -d`でコンテナを再作成して反映します。外部エディターによるRCON設定変更と`docker compose restart`だけでは、このクライアント設定は更新されません。
 
 未移行のサーバーで配布された`server.properties`を使う場合は、サーバーを停止して「サーバー設定 → server.propertiesをインポート」を選ぶか、`mcserver-kit server <server-id> import-properties /path/to/server.properties`を実行します。Windowsダイアログを有効にしているWSL環境では、設定画面からWindowsのファイル選択画面を開けます。既存のデータファイルは置換前にバックアップします。対応する項目を`server.env`へ取り込み、その他のキーは`CUSTOM_SERVER_PROPERTIES`へ保存します。設定の正本は引き続き`server.env`で、元ファイルも`data/server.properties`へコピーします。`\:`などJava Propertiesのエスケープを解釈します。配布ファイルの`level-name`が異なっても、ワールドの配置は`data/world`、Composeの設定は`LEVEL=world`のままです。ポートが異なる場合や書式が不正な場合は変更前にエラーにします。サーバー起動中にファイルを直接編集しないでください。
 

@@ -370,7 +370,10 @@ CONFIG
   assert_equal 'present' "$([[ -f "${target}/.env" ]] && printf present)" 'the creation flow writes .env'
   assert_equal 'present' "$([[ -f "${target}/server.env" ]] && printf present)" 'the creation flow writes unified Minecraft settings'
   assert_equal 'present' "$(grep -q '^    env_file:$' "${target}/compose.yaml" && printf present)" 'Compose loads unified Minecraft settings'
-  assert_equal 'survival' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${target}/server.env" MODE)" 'new servers default to survival mode'
+  assert_equal 'survival' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "${target}/data/server.properties" gamemode)" 'new servers default to survival mode in server.properties'
+  assert_equal 'properties' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" source-mode "$target")" 'new servers use properties without a migration step'
+  assert_equal 'absent' "$(! grep -q '^MODE=' "${target}/server.env" && printf absent)" 'new servers have no duplicate game mode environment setting'
+  assert_equal 'absent' "$(! grep -q '^      LEVEL:' "${target}/compose.yaml" && printf absent)" 'world selection is stored in properties instead of Compose'
   assert_equal 'present' "$([[ -f "${target}/data/world/level.dat" ]] && printf present)" 'the creation flow copies the world'
   assert_equal 'present' "$(grep -q '\[5/5\].*Docker Compose設定を検証' "$output_log" && printf present)" 'the creation flow reports Compose validation progress'
 }
@@ -1084,6 +1087,8 @@ WHIPTAIL
 main() {
   TEST_TEMP_DIR="$(mktemp -d)"
   trap cleanup EXIT
+
+  python3 "${REPO_ROOT}/tests/test-properties-initialization.py"
 
   test_version_resolution
   test_locales

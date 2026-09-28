@@ -186,7 +186,7 @@ mcserver-kit server <server-id> properties
 
 The editor covers MOTD, difficulty, game mode, player limit, online mode, whitelist, operators, flight, command blocks, PvP, view and simulation distance, spawn protection, Nether and entity spawning, and resource packs.
 
-Normally, `server.env` is the source of truth for settings managed by the toolkit. Docker Compose passes these values to `itzg/minecraft-server`, which applies them to `server.properties` when the container starts.
+New servers use `data/server.properties` as the source of truth from creation, before the first start. `server.env` keeps whitelist/operator membership settings and disables itzg property overrides with `OVERRIDE_SERVER_PROPERTIES=false`. Version, memory, and other container settings remain in `.env` and Compose. Existing servers keep their previous settings until explicitly migrated.
 
 An existing server can be migrated so that `data/server.properties` becomes the source of truth. Stop the server first, then run:
 
@@ -209,6 +209,10 @@ mcserver-kit server <server-id> properties import /path/to/server.properties
 ```
 
 Mutating commands require the server to be stopped and create a snapshot before changing the file. Backups are stored under `backups/server-properties/`. A restore also backs up the file it replaces.
+
+For new or migrated servers, imports replace `data/server.properties` and preserve its authority. The managed layout keeps `level-name=world` and `server-port=25565`. The existing TUI edits its supported settings directly in this file; a TUI for arbitrary keys and descriptions is still planned.
+
+New servers also receive a random RCON password. `ENABLE_RCON`, `RCON_PORT`, and `RCON_PASSWORD` in `server.env` are derived client settings for itzg, not independent inputs. Use the properties commands when changing RCON settings: edits, imports, and restores refresh these values. Recreate the container with `docker compose up -d` to reload changed environment values. Editing RCON properties externally and running `docker compose restart` does not refresh this client configuration.
 
 For an unmigrated server using a distributed `server.properties`, stop the server and choose **Server settings → Import server.properties**, or run `mcserver-kit server <server-id> import-properties /path/to/server.properties`. On WSL, the settings screen offers a Windows file picker when Windows dialogs are enabled. The existing data file is backed up before replacement. Supported properties are imported into `server.env`; additional keys are stored in `CUSTOM_SERVER_PROPERTIES`. `server.env` remains the source of truth, and the imported file is also copied to `data/server.properties`. Java Properties escapes such as `\:` are decoded. If the distributed `level-name` differs, the toolkit keeps its existing `data/world` layout and Compose's `LEVEL=world` setting. A nonstandard server port or malformed property is rejected before changing the server. Do not edit the file while the server is running.
 

@@ -248,6 +248,9 @@ import_properties() {
     if [[ -s "$output" ]]; then
       whiptail --title "$(tr properties.import)" --textbox "$output" 16 82
       manual_properties=false
+      if [[ "$(python3 "$CONFIG_TOOL" source-mode "$SERVER_DIR")" == properties ]]; then
+        manual_properties=true
+      fi
       changed=true
     fi
   else
