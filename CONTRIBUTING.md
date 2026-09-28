@@ -143,6 +143,19 @@ A language pull request should include the catalog, selector and CLI wiring, tes
 
 Machine translation is acceptable as a draft, but please review the result in the actual TUI. Short labels, terminal width, and Minecraft terminology matter more than literal wording.
 
+## Property descriptions
+
+`share/mcserver-kit/properties.json` contains suggested Minecraft property keys.
+Each entry points to a description key in the existing locale catalogs; keep the
+English sentence short and add translations where available. Missing translations
+fall back to English. Use Minecraft's exact key spelling, not an environment variable
+alias. Set `"secret": true` for a field whose value should be hidden in the editor.
+
+This catalog is a set of suggestions, not a whitelist or a complete version schema.
+Unknown keys must remain editable. Do not add defaults or claim version support
+without checking the target server. Run `bash tests/run-tests.sh` to check catalog
+references, fallback, editing, cancellation, and the CLI safety checks.
+
 ## Pull requests
 
 Before opening a pull request:

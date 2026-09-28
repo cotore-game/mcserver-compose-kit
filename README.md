@@ -210,7 +210,11 @@ mcserver-kit server <server-id> properties import /path/to/server.properties
 
 Mutating commands require the server to be stopped and create a snapshot before changing the file. Backups are stored under `backups/server-properties/`. A restore also backs up the file it replaces.
 
-For new or migrated servers, imports replace `data/server.properties` and preserve its authority. The managed layout keeps `level-name=world` and `server-port=25565`. The existing TUI edits its supported settings directly in this file; a TUI for arbitrary keys and descriptions is still planned.
+For new or migrated servers, imports replace `data/server.properties` and preserve its authority. The managed layout keeps `level-name=world` and `server-port=25565`.
+
+Open `mcserver-kit server <server-id> properties` and choose **All server.properties keys** to browse the file using Minecraft's original key names. Select a key to view, edit, or remove it; **Add a key** offers described suggestions and manual entry for other keys, including mod settings. Cancel returns to the previous menu. Saved changes and confirmed removals use the CLI's stop check and automatic backup. Removing a key may let Minecraft recreate its default at the next startup.
+
+The description catalog currently covers 25 common keys in English and Japanese, not every setting of every Minecraft version. Unlisted keys remain editable. Values are entered as text; this editor does not yet validate all version-specific types or ranges. Password fields are masked. Unmigrated servers must run `properties migrate` before using this editor.
 
 New servers also receive a random RCON password. `ENABLE_RCON`, `RCON_PORT`, and `RCON_PASSWORD` in `server.env` are derived client settings for itzg, not independent inputs. Use the properties commands when changing RCON settings: edits, imports, and restores refresh these values. Recreate the container with `docker compose up -d` to reload changed environment values. Editing RCON properties externally and running `docker compose restart` does not refresh this client configuration.
 
