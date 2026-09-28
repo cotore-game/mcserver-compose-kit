@@ -1,0 +1,78 @@
+{
+  "motd": {
+    "description": "properties.description.motd"
+  },
+  "gamemode": {
+    "description": "properties.description.gamemode"
+  },
+  "difficulty": {
+    "description": "properties.description.difficulty"
+  },
+  "max-players": {
+    "description": "properties.description.max-players"
+  },
+  "online-mode": {
+    "description": "properties.description.online-mode"
+  },
+  "white-list": {
+    "description": "properties.description.white-list"
+  },
+  "enforce-whitelist": {
+    "description": "properties.description.enforce-whitelist"
+  },
+  "allow-flight": {
+    "description": "properties.description.allow-flight"
+  },
+  "enable-command-block": {
+    "description": "properties.description.enable-command-block"
+  },
+  "pvp": {
+    "description": "properties.description.pvp"
+  },
+  "view-distance": {
+    "description": "properties.description.view-distance"
+  },
+  "simulation-distance": {
+    "description": "properties.description.simulation-distance"
+  },
+  "spawn-protection": {
+    "description": "properties.description.spawn-protection"
+  },
+  "force-gamemode": {
+    "description": "properties.description.force-gamemode"
+  },
+  "hardcore": {
+    "description": "properties.description.hardcore"
+  },
+  "player-idle-timeout": {
+    "description": "properties.description.player-idle-timeout"
+  },
+  "level-name": {
+    "description": "properties.description.level-name"
+  },
+  "server-port": {
+    "description": "properties.description.server-port"
+  },
+  "enable-rcon": {
+    "description": "properties.description.enable-rcon"
+  },
+  "rcon.port": {
+    "description": "properties.description.rcon.port"
+  },
+  "rcon.password": {
+    "description": "properties.description.rcon.password",
+    "secret": true
+  },
+  "resource-pack": {
+    "description": "properties.description.resource-pack"
+  },
+  "resource-pack-sha1": {
+    "description": "properties.description.resource-pack-sha1"
+  },
+  "resource-pack-id": {
+    "description": "properties.description.resource-pack-id"
+  },
+  "require-resource-pack": {
+    "description": "properties.description.require-resource-pack"
+  }
+}

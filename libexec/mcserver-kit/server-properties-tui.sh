@@ -262,6 +262,21 @@ import_properties() {
   rm -f -- "$output"
 }
 
+edit_all_properties() {
+  local status
+  if [[ "$manual_properties" != true ]]; then
+    whiptail --msgbox "$(tr properties.migrate_first)" 12 82 || true
+    return 0
+  fi
+  if python3 "${SCRIPT_DIR}/properties-tui.py" "$SERVER_ID" "$SERVER_DIR"; then
+    return 0
+  else
+    status=$?
+    # 10 means saved changes; other errors have already been shown by the editor.
+    [[ "$status" != 10 ]] || changed=true
+  fi
+}
+
 main() {
   local selected source_mode
   local items
@@ -306,6 +321,7 @@ main() {
       PVP "$(menu_item "$(tr properties.pvp)" "$(setting_get PVP true)")"
       VIEW_DISTANCE "$(menu_item "$(tr properties.view_distance)" "$(setting_get VIEW_DISTANCE 10)")"
       SIMULATION_DISTANCE "$(menu_item "$(tr properties.simulation_distance)" "$(setting_get SIMULATION_DISTANCE 10)")"
+      __all "$(tr properties.editor.title)"
       __more "$(tr properties.more_settings)"
       __resource "$(tr properties.resource_pack_settings)"
       __import "$(tr properties.import)"
@@ -314,6 +330,7 @@ main() {
     selected="$(whiptail --title "${SERVER_ID}" --menu "$(tr properties.choose)" 25 94 18 "${items[@]}" 3>&1 1>&2 2>&3)" || break
     case "$selected" in
       __exit) break ;;
+      __all) edit_all_properties ;;
       __import) import_properties || true ;;
       __more)
         selected="$(whiptail --title "${SERVER_ID}" --menu "$(tr properties.more_settings)" 24 90 15 \

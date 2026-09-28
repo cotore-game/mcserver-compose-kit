@@ -1089,6 +1089,7 @@ main() {
   trap cleanup EXIT
 
   python3 "${REPO_ROOT}/tests/test-properties-initialization.py"
+  python3 "${REPO_ROOT}/tests/test-properties-tui.py"
 
   test_version_resolution
   test_locales
