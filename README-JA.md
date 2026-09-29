@@ -47,7 +47,7 @@ curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/ma
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | \
-  bash -s -- --version v1.1.3
+  bash -s -- --version v1.1.4
 ```
 
 インストーラーはリリースの圧縮ファイルを取得し、SHA-256を検証して`~/.local/share/mcserver-compose-kit`へ配置します。また、`~/.local/bin`用のPATH設定を管理ブロックとして`~/.bashrc`へ追加します。
@@ -92,6 +92,8 @@ mcserver-kit
 ```
 
 ホーム画面から、サーバー作成・管理、全体設定、MCIDテンプレート、言語、動作環境診断、ヘルプへ進めます。矢印キーで選択し、Enterで決定します。
+
+サーバー操作や更新確認の実行中は、ひとつの待機画面を開いたまま点字スピナーを表示します。コマンドの出力は一時ファイルに蓄積し、終了後にエラーも含めて表示します。アニメーションのたびに画面を開閉する方式は廃止しました。メニューやボタンの配置・操作は従来どおりで、メニュー間の画面遷移自体を刷新する修正ではありません。
 
 インストールされているツールのバージョンは次で確認できます。
 

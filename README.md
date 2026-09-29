@@ -47,7 +47,7 @@ Install a specific release:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | \
-  bash -s -- --version v1.1.3
+  bash -s -- --version v1.1.4
 ```
 
 The installer downloads the release archive, verifies its SHA-256 checksum, and installs the program under `~/.local/share/mcserver-compose-kit`. It also adds a managed PATH block for `~/.local/bin` to `~/.bashrc`.
@@ -91,6 +91,8 @@ mcserver-kit
 ```
 
 The dashboard includes server creation and management, global settings, MCID templates, language selection, diagnostics, and help. Use the arrow keys to select an item and Enter to open it.
+
+While server actions or update checks run, a single waiting dialog shows a braille spinner. Command output is collected in a temporary file and displayed afterward, including errors. The waiting dialog no longer opens and closes for each animation frame. Menus, buttons, and navigation retain the existing layout; this fix does not redesign transitions between menus.
 
 Check the installed toolkit version with:
 
