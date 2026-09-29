@@ -47,7 +47,7 @@ Install a specific release:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | \
-  bash -s -- --version v1.1.3
+  bash -s -- --version v1.1.4
 ```
 
 The installer downloads the release archive, verifies its SHA-256 checksum, and installs the program under `~/.local/share/mcserver-compose-kit`. It also adds a managed PATH block for `~/.local/bin` to `~/.bashrc`.
@@ -91,6 +91,10 @@ mcserver-kit
 ```
 
 The dashboard includes server creation and management, global settings, MCID templates, language selection, diagnostics, and help. Use the arrow keys to select an item and Enter to open it.
+
+The TUI keeps one terminal session open between menus. While Docker state or the next screen is loading, the frame stays visible with a braille spinner; no percentage or progress bar is shown. Tab switches between OK and Cancel, and Esc returns to the previous menu (or exits at the home screen). Results stay open until dismissed; use the arrow keys or Page Up/Down to scroll.
+
+Server creation and live logs still use their line-oriented screens inside the same terminal session. Follow their return instructions to get back to the menus. The persistent renderer uses Python's standard-library curses module, available with Ubuntu's Python installation; no pip packages are needed.
 
 Check the installed toolkit version with:
 
