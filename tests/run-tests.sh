@@ -529,7 +529,7 @@ CURL
     MCSERVER_KIT_UPDATE_CACHE_DIR="${temp_dir}/home-transition/cache" \
     MCSERVER_KIT_TEST_EVENTS="$event_log" MCSERVER_KIT_TEST_MENU_COUNT="$menu_count" \
     bash "${REPO_ROOT}/mcserver-kit" home)"
-  assert_equal 'present' "$(grep -Fq 'loading' "$event_log" && printf present)" 'update checks retain a progress dialog'
+  assert_equal 'absent' "$(grep -Fq 'loading' "$event_log" && printf present || printf absent)" 'progress no longer repeatedly opens whiptail infobox'
   assert_equal 'present' "$(grep -Fq 'result' "$event_log" && printf present)" 'update result is shown in a persistent dialog'
   assert_equal 'menu' "$(tail -n 1 "$event_log")" 'the home menu returns after viewing the update result'
 }
@@ -950,6 +950,7 @@ WHIPTAIL
 }
 
 main() {
+  PYTHONDONTWRITEBYTECODE=1 python3 "${REPO_ROOT}/tests/test-tui-progress.py"
   TEST_TEMP_DIR="$(mktemp -d)"
   trap cleanup EXIT
 
