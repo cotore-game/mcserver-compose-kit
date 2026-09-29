@@ -1,9 +1,4 @@
 {
-  "tui.session.loading": "読み込み・処理中…",
-  "tui.session.hint": "↑↓ 選択・スクロール · Tab ボタン切替 · Enter 決定・戻る · Esc キャンセル",
-  "tui.session.ok": "< 決定 >",
-  "tui.session.cancel": "< キャンセル >",
-  "tui.session.small": "端末を広げてください（最低35列×10行）。",
   "cli.description": "Minecraft Java配布ワールド用サーバー作成ツール",
   "cli.usage": "使い方:",
   "cli.commands": "コマンド:",

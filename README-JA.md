@@ -47,7 +47,7 @@ curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/ma
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | \
-  bash -s -- --version v1.1.4
+  bash -s -- --version v1.1.3
 ```
 
 インストーラーはリリースの圧縮ファイルを取得し、SHA-256を検証して`~/.local/share/mcserver-compose-kit`へ配置します。また、`~/.local/bin`用のPATH設定を管理ブロックとして`~/.bashrc`へ追加します。
@@ -92,10 +92,6 @@ mcserver-kit
 ```
 
 ホーム画面から、サーバー作成・管理、全体設定、MCIDテンプレート、言語、動作環境診断、ヘルプへ進めます。矢印キーで選択し、Enterで決定します。
-
-メニュー間では同じ端末画面を維持します。Dockerの状態取得や次の画面の読み込み中も枠を残して点字スピナーを表示し、進捗率やプログレスバーは表示しません。Tabで決定・キャンセルを切り替え、Escで前のメニューへ戻ります（ホームでは終了）。処理結果は閉じるまで表示され、矢印キーやPage Up/Downでスクロールできます。
-
-新規作成と追尾ログは、同じ端末セッション内で従来の行単位の画面を使います。表示された案内に従ってメニューへ戻ってください。常駐描画にはUbuntuのPythonに含まれる標準ライブラリのcursesを使用し、pipパッケージの追加は不要です。
 
 インストールされているツールのバージョンは次で確認できます。
 
