@@ -1,4 +1,9 @@
 {
+  "tui.session.loading": "Loading / processing…",
+  "tui.session.hint": "↑↓ Select / scroll · Tab Switch button · Enter Confirm / return · Esc Cancel",
+  "tui.session.ok": "< OK >",
+  "tui.session.cancel": "< Cancel >",
+  "tui.session.small": "Enlarge the terminal (at least 35 × 10).",
   "cli.description": "Minecraft Java distribution-world server toolkit",
   "cli.usage": "Usage:",
   "cli.commands": "Commands:",
