@@ -119,17 +119,10 @@ pause_for_enter() {
 run_and_show() {
   local title="$1"
   shift
-  local output pid result=0 frame_index=0
-  local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+  local output result=0
   new_temp_file output
-  "$@" >"$output" 2>&1 &
-  pid=$!
-  while kill -0 "$pid" 2>/dev/null; do
-    whiptail --title "$title" --infobox "$(tr home.processing "${frames[frame_index]}" "$title")" 8 72
-    frame_index=$(((frame_index + 1) % ${#frames[@]}))
-    sleep 0.15
-  done
-  wait "$pid" || result=$?
+  python3 "${SCRIPT_DIR}/tui-progress.py" --output "$output" --title "$title" \
+    --message "$(tr home.processing '{spinner}' "$title")" -- "$@" || result=$?
   if [[ ! -s "$output" ]]; then
     if ((result == 0)); then
       tr home.completed >"$output"
