@@ -4,6 +4,9 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -z "${MCSERVER_KIT_TUI_SOCKET:-}" && -t 0 && -t 1 ]]; then
+  exec python3 "${SCRIPT_DIR}/tui-session.py" run bash "${BASH_SOURCE[0]}" "$@"
+fi
 CONFIG_FILE="${MCSERVER_KIT_CONFIG:-${HOME}/.config/mcserver-compose-kit/config.yml}"
 ROOT_DIR="${MCSERVER_KIT_ROOT:-$(cd -- "${SCRIPT_DIR}/../.." && pwd)}"
 CONFIG_VALUE="${SCRIPT_DIR}/config-value.py"
@@ -121,8 +124,8 @@ run_and_show() {
   shift
   local output result=0
   new_temp_file output
-  python3 "${SCRIPT_DIR}/tui-progress.py" --output "$output" --title "$title" \
-    --message "$(tr home.processing '{spinner}' "$title")" -- "$@" || result=$?
+  whiptail --title "$title" --infobox "$(tr home.processing '⠋' "$title")" 8 72
+  "$@" >"$output" 2>&1 || result=$?
   if [[ ! -s "$output" ]]; then
     if ((result == 0)); then
       tr home.completed >"$output"
@@ -153,16 +156,18 @@ server_action_menu() {
       open-server "$(tr home.open_server)" \
       delete "$(tr home.delete_server)" \
       back "$(tr tui.back)" \
-      3>&1 1>&2 2>&3)" || return
+      3>&1 1>&2 2>&3)" || return 0
     case "$choice" in
       start | stop | restart | status)
         run_and_show "$(tr "home.${choice}") · $id" "${SCRIPT_DIR}/server-manager.sh" server "$id" "$choice"
         ;;
       logs)
+        tui_terminal_suspend
         clear
         printf '%s\n\n' "$(tr home.logs_return_hint)"
         "${SCRIPT_DIR}/server-manager.sh" server "$id" logs || true
         pause_for_enter
+        tui_terminal_resume
         ;;
       properties)
         "${SCRIPT_DIR}/server-manager.sh" server "$id" properties || true
@@ -225,7 +230,7 @@ servers_menu() {
       shopt -u nullglob
     fi
     items+=(__back "$(tr tui.back)")
-    selected="$(whiptail --title "$(tr home.servers)" --menu "$(tr home.select_server)" 23 82 15 "${items[@]}" 3>&1 1>&2 2>&3)" || return
+    selected="$(whiptail --title "$(tr home.servers)" --menu "$(tr home.select_server)" 23 82 15 "${items[@]}" 3>&1 1>&2 2>&3)" || return 0
     [[ "$selected" == __back ]] && return
     server_action_menu "$selected" "${root}/${selected}"
   done
@@ -237,7 +242,7 @@ language_menu() {
   selected="$(whiptail --title "$(tr home.language)" --radiolist "$(tr home.language_choose)" 13 66 2 \
     en English "$([[ "$current" == en ]] && printf ON || printf OFF)" \
     ja '日本語' "$([[ "$current" == ja ]] && printf ON || printf OFF)" \
-    3>&1 1>&2 2>&3)" || return
+    3>&1 1>&2 2>&3)" || return 0
   "${SCRIPT_DIR}/lang.sh" "--${selected}" >/dev/null
   I18N_MESSAGES=()
   load_messages "$selected"
@@ -285,13 +290,15 @@ main() {
       update "$(tr home.update)" \
       help "$(tr home.help)" \
       exit "$(tr home.exit)" \
-      3>&1 1>&2 2>&3)" || return
+      3>&1 1>&2 2>&3)" || return 0
     case "$choice" in
       servers) servers_menu ;;
       create)
+        tui_terminal_suspend
         clear
         "${SCRIPT_DIR}/create-server.sh" || true
         pause_for_enter
+        tui_terminal_resume
         ;;
       config) "${SCRIPT_DIR}/config-tui.sh" || true ;;
       templates) "${SCRIPT_DIR}/config-tui.sh" templates || true ;;

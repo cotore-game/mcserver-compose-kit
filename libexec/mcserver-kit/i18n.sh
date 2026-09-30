@@ -5,6 +5,24 @@ I18N_SHARE_DIR="${MCSERVER_KIT_SHARE_DIR:-${I18N_ROOT}/share/mcserver-kit}"
 I18N_LOCALE_DIR="${I18N_SHARE_DIR}/locales"
 declare -A I18N_MESSAGES=()
 
+# A home session owns the terminal. Dialog subprocesses exchange only data,
+# so OK/Cancel never restores the shell while the next screen is being loaded.
+if [[ -n "${MCSERVER_KIT_TUI_SOCKET:-}" ]]; then
+  whiptail() {
+    python3 "${I18N_ROOT}/libexec/mcserver-kit/tui-session.py" client "$@"
+  }
+fi
+
+tui_terminal_suspend() {
+  [[ -z "${MCSERVER_KIT_TUI_SOCKET:-}" ]] ||
+    python3 "${I18N_ROOT}/libexec/mcserver-kit/tui-session.py" client --suspend
+}
+
+tui_terminal_resume() {
+  [[ -z "${MCSERVER_KIT_TUI_SOCKET:-}" ]] ||
+    python3 "${I18N_ROOT}/libexec/mcserver-kit/tui-session.py" client --resume
+}
+
 detect_language() {
   local requested="${MCSERVER_KIT_LANG:-}"
   local language_file="${MCSERVER_KIT_LANGUAGE_FILE:-${HOME}/.config/mcserver-compose-kit/language}"

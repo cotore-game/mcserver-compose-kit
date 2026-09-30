@@ -4,6 +4,9 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -z "${MCSERVER_KIT_TUI_SOCKET:-}" && -t 0 && -t 1 ]]; then
+  exec python3 "${SCRIPT_DIR}/tui-session.py" run bash "${BASH_SOURCE[0]}" "$@"
+fi
 SERVER_ID="${1-}"
 SERVER_DIR="${2-}"
 SERVER_ENV="${SERVER_DIR}/server.env"
@@ -91,7 +94,7 @@ edit_boolean() {
   selected="$(whiptail --title "$label" --radiolist "$label" 12 64 2 \
     true "$(tr properties.enabled)" "$([[ "${current,,}" == true ]] && printf ON || printf OFF)" \
     false "$(tr properties.disabled)" "$([[ "${current,,}" == false ]] && printf ON || printf OFF)" \
-    3>&1 1>&2 2>&3)" || return
+    3>&1 1>&2 2>&3)" || return 0
   setting_set "$key" "$selected"
 }
 
@@ -102,14 +105,14 @@ edit_choice() {
   for value in "$@"; do
     items+=("$value" "$([[ "$value" == "$current" ]] && tr properties.selected || printf ' ')")
   done
-  value="$(whiptail --title "$label" --menu "$label" 17 72 9 "${items[@]}" 3>&1 1>&2 2>&3)" || return
+  value="$(whiptail --title "$label" --menu "$label" 17 72 9 "${items[@]}" 3>&1 1>&2 2>&3)" || return 0
   setting_set "$key" "$value"
 }
 
 edit_number() {
   local key="$1" label="$2" current="$3" minimum="$4" maximum="$5" value
   while true; do
-    value="$(whiptail --title "$label" --inputbox "$label (${minimum}-${maximum})" 10 68 "$current" 3>&1 1>&2 2>&3)" || return
+    value="$(whiptail --title "$label" --inputbox "$label (${minimum}-${maximum})" 10 68 "$current" 3>&1 1>&2 2>&3)" || return 0
     if [[ "$value" =~ ^[0-9]+$ ]] && ((value >= minimum && value <= maximum)); then
       setting_set "$key" "$value"
       return
@@ -120,7 +123,7 @@ edit_number() {
 
 edit_text() {
   local key="$1" label="$2" current="$3" value
-  value="$(whiptail --title "$label" --inputbox "$label" 11 76 "$current" 3>&1 1>&2 2>&3)" || return
+  value="$(whiptail --title "$label" --inputbox "$label" 11 76 "$current" 3>&1 1>&2 2>&3)" || return 0
   setting_set "$key" "$value"
 }
 
@@ -129,7 +132,7 @@ edit_mcid_list() {
   local entries=()
   current="$(setting_get "$key" '')"
   while true; do
-    value="$(whiptail --title "$label" --inputbox "$(tr properties.mcid_list_hint)" 11 76 "$current" 3>&1 1>&2 2>&3)" || return
+    value="$(whiptail --title "$label" --inputbox "$(tr properties.mcid_list_hint)" 11 76 "$current" 3>&1 1>&2 2>&3)" || return 0
     normalized=''
     IFS=',' read -ra entries <<<"$value"
     for entry in "${entries[@]}"; do
@@ -154,7 +157,7 @@ edit_url() {
   local current value
   current="$(setting_get RESOURCE_PACK '')"
   while true; do
-    value="$(whiptail --title "$(tr properties.resource_pack_url)" --inputbox "$(tr properties.resource_pack_url_hint)" 11 76 "$current" 3>&1 1>&2 2>&3)" || return
+    value="$(whiptail --title "$(tr properties.resource_pack_url)" --inputbox "$(tr properties.resource_pack_url_hint)" 11 76 "$current" 3>&1 1>&2 2>&3)" || return 0
     if [[ -z "$value" || "$value" =~ ^https:// ]]; then
       setting_set RESOURCE_PACK "$value"
       return
@@ -167,7 +170,7 @@ edit_uuid() {
   local current value
   current="$(setting_get RESOURCE_PACK_ID '')"
   while true; do
-    value="$(whiptail --title "$(tr properties.resource_pack_id)" --inputbox "$(tr properties.resource_pack_id_hint)" 11 76 "$current" 3>&1 1>&2 2>&3)" || return
+    value="$(whiptail --title "$(tr properties.resource_pack_id)" --inputbox "$(tr properties.resource_pack_id_hint)" 11 76 "$current" 3>&1 1>&2 2>&3)" || return 0
     if [[ -z "$value" || "$value" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
       setting_set RESOURCE_PACK_ID "${value,,}"
       return
@@ -180,7 +183,7 @@ edit_sha1() {
   local current value
   current="$(setting_get RESOURCE_PACK_SHA1 '')"
   while true; do
-    value="$(whiptail --title "$(tr properties.resource_pack_sha1)" --inputbox "$(tr properties.resource_pack_sha1_hint)" 11 76 "$current" 3>&1 1>&2 2>&3)" || return
+    value="$(whiptail --title "$(tr properties.resource_pack_sha1)" --inputbox "$(tr properties.resource_pack_sha1_hint)" 11 76 "$current" 3>&1 1>&2 2>&3)" || return 0
     if [[ -z "$value" || "$value" =~ ^[0-9a-fA-F]{40}$ ]]; then
       setting_set RESOURCE_PACK_SHA1 "${value,,}"
       return
@@ -242,7 +245,7 @@ finish() {
 
 import_properties() {
   local output result
-  whiptail --yesno "$(tr home.import_confirm "$SERVER_ID")" 12 76 || return
+  whiptail --yesno "$(tr home.import_confirm "$SERVER_ID")" 12 76 || return 0
   output="$(mktemp)"
   if "${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" import-properties >"$output" 2>&1; then
     if [[ -s "$output" ]]; then

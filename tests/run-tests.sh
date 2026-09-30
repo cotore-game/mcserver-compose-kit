@@ -1226,6 +1226,7 @@ WHIPTAIL
 
 main() {
   PYTHONDONTWRITEBYTECODE=1 python3 "${REPO_ROOT}/tests/test-tui-progress.py"
+  PYTHONDONTWRITEBYTECODE=1 python3 "${REPO_ROOT}/tests/test-tui-session.py"
   TEST_TEMP_DIR="$(mktemp -d)"
   trap cleanup EXIT
 
