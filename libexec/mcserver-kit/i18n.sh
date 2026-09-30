@@ -5,6 +5,27 @@ I18N_SHARE_DIR="${MCSERVER_KIT_SHARE_DIR:-${I18N_ROOT}/share/mcserver-kit}"
 I18N_LOCALE_DIR="${I18N_SHARE_DIR}/locales"
 declare -A I18N_MESSAGES=()
 
+set_default_tui_colors() {
+  [[ -n "${NEWT_COLORS:-}" ]] && return 0
+  export NEWT_COLORS="${MCSERVER_KIT_TUI_COLORS:-
+root=white,black
+window=white,black
+border=lightgray,black
+title=lightcyan,black
+textbox=white,black
+listbox=white,black
+actlistbox=white,blue
+actsellistbox=white,blue
+button=black,lightgray
+actbutton=white,blue
+compactbutton=white,black
+entry=white,black
+label=white,black
+checkbox=white,black
+actcheckbox=white,blue
+}"
+}
+
 # A home session owns the terminal. Dialog subprocesses exchange only data,
 # so OK/Cancel never restores the shell while the next screen is being loaded.
 if [[ -n "${MCSERVER_KIT_TUI_SOCKET:-}" ]]; then

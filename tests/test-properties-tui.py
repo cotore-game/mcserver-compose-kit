@@ -186,6 +186,49 @@ sys.exit(status)
         self.assertEqual(self.editor.values()["mod.example"], "new value")
         self.assertEqual(len(list((self.server / "backups/server-properties").glob("*"))), 1)
 
+    def test_common_setting_uses_guarded_backup_path(self):
+        (self.server / "compose.yaml").write_text("services: {}\n")
+        (self.server / "server.env").write_text("OVERRIDE_SERVER_PROPERTIES=false\n")
+        config_path = self.root / "config.yml"
+        config_path.write_text(f"paths:\n  server_root: {self.root}\n")
+        fake_bin = self.root / "bin"
+        fake_bin.mkdir()
+        docker = fake_bin / "docker"
+        docker.write_text("#!/bin/sh\nexit 0\n")
+        docker.chmod(0o755)
+        queue = self.root / "dialogs.json"
+        queue.write_text(json.dumps([
+            ["menu", "MOTD", 0], ["inputbox", "Updated", 0],
+            ["menu", "__exit", 0], ["yesno", "", 1], ["msgbox", "", 0],
+        ]))
+        whiptail = fake_bin / "whiptail"
+        whiptail.write_text("""#!/usr/bin/env python3
+import json, os, pathlib, sys
+queue = pathlib.Path(os.environ["TUI_TEST_QUEUE"])
+items = json.loads(queue.read_text())
+kind, value, status = items.pop(0)
+assert "--" + kind in sys.argv, (kind, sys.argv)
+queue.write_text(json.dumps(items))
+sys.stderr.write(value)
+sys.exit(status)
+""")
+        whiptail.chmod(0o755)
+        before = self.properties.read_bytes()
+        environment = dict(os.environ, MCSERVER_KIT_CONFIG=str(config_path),
+                           MCSERVER_KIT_LANG="en", TUI_TEST_QUEUE=str(queue),
+                           PATH=f"{fake_bin}:{os.environ['PATH']}")
+        result = subprocess.run(
+            ["bash", str(ROOT / "libexec/mcserver-kit/server-properties-tui.sh"),
+             "demo", str(self.server)], env=environment,
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(queue.read_text()), [])
+        self.assertEqual(self.editor.values()["motd"], "Updated")
+        backups = list((self.server / "backups/server-properties").glob("*.properties"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), before)
+
 
 if __name__ == "__main__":
     unittest.main()

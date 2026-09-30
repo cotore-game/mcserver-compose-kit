@@ -234,10 +234,6 @@ def set_property_key(path: Path, property_key: str, value: str) -> None:
         sync_rcon_environment(path)
 
 
-def set_property(path: Path, env_key: str, value: str) -> None:
-    set_property_key(path, PROPERTY_KEYS[env_key], value)
-
-
 def remove_property_key(path: Path, property_key: str) -> bool:
     validate_property_key(property_key)
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -706,14 +702,11 @@ def main() -> int:
         default = sys.argv[4] if len(sys.argv) == 5 else ""
         print(parse_import_properties(target).get(key, default))
         return 0
-    if operation == "property-set" and len(sys.argv) == 5:
-        if sys.argv[3] not in PROPERTY_KEYS:
+    if operation == "property-key" and len(sys.argv) == 3:
+        key = PROPERTY_KEYS.get(str(target))
+        if key is None:
             return 2
-        try:
-            set_property(target, sys.argv[3], sys.argv[4])
-        except (OSError, ValueError, UnicodeError) as error:
-            print(f"Could not edit server.properties: {error}", file=sys.stderr)
-            return 1
+        print(key)
         return 0
     if operation == "property-list" and len(sys.argv) == 3:
         try:

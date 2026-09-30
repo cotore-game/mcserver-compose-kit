@@ -16,26 +16,7 @@ TEMP_FILES=()
 # shellcheck source=libexec/mcserver-kit/i18n.sh
 source "${SCRIPT_DIR}/i18n.sh"
 load_messages
-
-if [[ -z "${NEWT_COLORS:-}" ]]; then
-  export NEWT_COLORS="${MCSERVER_KIT_TUI_COLORS:-
-root=white,black
-window=white,black
-border=lightgray,black
-title=lightcyan,black
-textbox=white,black
-listbox=white,black
-actlistbox=white,blue
-actsellistbox=white,blue
-button=black,lightgray
-actbutton=white,blue
-compactbutton=white,black
-entry=white,black
-label=white,black
-checkbox=white,black
-actcheckbox=white,blue
-}"
-fi
+set_default_tui_colors
 
 cleanup() {
   local path

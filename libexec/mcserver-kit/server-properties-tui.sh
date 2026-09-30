@@ -18,26 +18,7 @@ manual_properties=false
 # shellcheck source=libexec/mcserver-kit/i18n.sh
 source "${SCRIPT_DIR}/i18n.sh"
 load_messages
-
-if [[ -z "${NEWT_COLORS:-}" ]]; then
-  export NEWT_COLORS="${MCSERVER_KIT_TUI_COLORS:-
-root=white,black
-window=white,black
-border=lightgray,black
-title=lightcyan,black
-textbox=white,black
-listbox=white,black
-actlistbox=white,blue
-actsellistbox=white,blue
-button=black,lightgray
-actbutton=white,blue
-compactbutton=white,black
-entry=white,black
-label=white,black
-checkbox=white,black
-actcheckbox=white,blue
-}"
-fi
+set_default_tui_colors
 
 die() {
   if command -v whiptail >/dev/null 2>&1; then
@@ -77,11 +58,17 @@ setting_get() {
 }
 
 setting_set() {
+  local property_key error
   if [[ "$manual_properties" == true ]]; then
     case "$1" in
       WHITELIST | EXISTING_WHITELIST_FILE | OPS | EXISTING_OPS_FILE)
         python3 "$CONFIG_TOOL" set "$SERVER_ENV" "$1" "$2" ;;
-      *) python3 "$CONFIG_TOOL" property-set "$SERVER_PROPERTIES" "$1" "$2" ;;
+      *)
+        property_key="$(python3 "$CONFIG_TOOL" property-key "$1")"
+        if ! error="$("${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" properties set "$property_key" "$2" 2>&1)"; then
+          die "$error"
+        fi
+        ;;
     esac
   else
     python3 "$CONFIG_TOOL" set "$SERVER_ENV" "$1" "$2"
