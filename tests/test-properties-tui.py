@@ -142,6 +142,14 @@ class EditorTests(unittest.TestCase):
             self.assertFalse(self.editor.mutate("remove", "mod.example"))
             self.assertEqual(self.properties.read_bytes(), saved)
             self.assertEqual(len(list((self.server / "backups/server-properties").glob("*"))), 1)
+            restore = subprocess.run(
+                [str(tui.HERE / "server-manager.sh"), "server", "demo",
+                 "properties", "restore", backups[0].name],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertNotEqual(restore.returncode, 0)
+            self.assertEqual(self.properties.read_bytes(), saved)
+            self.assertEqual(len(list((self.server / "backups/server-properties").glob("*"))), 1)
 
     def test_shell_menu_opens_editor_and_returns_after_save(self):
         (self.server / "compose.yaml").write_text("services: {}\n")
@@ -229,6 +237,112 @@ sys.exit(status)
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), before)
 
+
+class SettingsWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        self.workspace = tempfile.TemporaryDirectory()
+        self.addCleanup(self.workspace.cleanup)
+        self.root = Path(self.workspace.name)
+        self.server = self.root / "demo"
+        (self.server / "data").mkdir(parents=True)
+        self.properties = self.server / "data/server.properties"
+        self.properties.write_text("motd=Original\nlevel-name=world\nserver-port=25565\n")
+        (self.server / "compose.yaml").write_text(
+            "services:\n  minecraft:\n    image: itzg/minecraft-server\n"
+            "    env_file:\n      - server.env\n    volumes:\n      - ./data:/data\n"
+        )
+        self.config_path = self.root / "config.yml"
+        self.config_path.write_text(f"paths:\n  server_root: {self.root}\n")
+        self.fake_bin = self.root / "bin"
+        self.fake_bin.mkdir()
+        docker = self.fake_bin / "docker"
+        docker.write_text(
+            '#!/bin/sh\nif [ "$TUI_TEST_RUNNING" = yes ] && '
+            '[ "$*" = "compose ps --status running --services" ]; then echo minecraft; fi\nexit 0\n'
+        )
+        docker.chmod(0o755)
+        whiptail = self.fake_bin / "whiptail"
+        whiptail.write_text("""#!/usr/bin/env python3
+import json, os, pathlib, sys
+queue = pathlib.Path(os.environ["TUI_TEST_QUEUE"])
+items = json.loads(queue.read_text())
+kind, value, status = items.pop(0)
+assert "--" + kind in sys.argv, (kind, sys.argv)
+if value == "@last":
+    value = sys.argv[-2]
+queue.write_text(json.dumps(items))
+sys.stderr.write(value)
+sys.exit(status)
+""")
+        whiptail.chmod(0o755)
+
+    def run_menu(self, choices, running="no"):
+        queue = self.root / "dialogs.json"
+        queue.write_text(json.dumps(choices))
+        environment = dict(os.environ, MCSERVER_KIT_CONFIG=str(self.config_path),
+                           MCSERVER_KIT_LANG="en", TUI_TEST_QUEUE=str(queue),
+                           TUI_TEST_RUNNING=running,
+                           PATH=f"{self.fake_bin}:{os.environ['PATH']}")
+        result = subprocess.run(
+            ["bash", str(ROOT / "libexec/mcserver-kit/server-properties-tui.sh"),
+             "demo", str(self.server)], env=environment,
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(queue.read_text()), [])
+
+    def test_backup_and_restore_from_settings_menu(self):
+        (self.server / "server.env").write_text("OVERRIDE_SERVER_PROPERTIES=false\n")
+        original = self.properties.read_bytes()
+        self.run_menu([
+            ["menu", "__backup", 0], ["textbox", "", 0],
+            ["menu", "MOTD", 0], ["inputbox", "Updated", 0],
+            ["menu", "__restore", 0], ["menu", "@last", 0],
+            ["yesno", "", 0], ["textbox", "", 0],
+            ["menu", "__exit", 0], ["yesno", "", 1], ["msgbox", "", 0],
+        ])
+        self.assertEqual(self.properties.read_bytes(), original)
+        backups = list((self.server / "backups/server-properties").glob("*.properties"))
+        self.assertGreaterEqual(len(backups), 3)
+        self.assertTrue(any("before-restore" in path.name for path in backups))
+
+    def test_migrate_existing_server_from_settings_menu(self):
+        (self.server / "server.env").write_text(
+            'MOTD="Legacy"\nOVERRIDE_SERVER_PROPERTIES="true"\n'
+        )
+        self.run_menu([
+            ["menu", "__migrate", 0], ["yesno", "", 0], ["textbox", "", 0],
+            ["menu", "__exit", 0], ["yesno", "", 1], ["msgbox", "", 0],
+        ])
+        self.assertEqual(tui.config.read_env(self.server / "server.env")["OVERRIDE_SERVER_PROPERTIES"], "false")
+        self.assertEqual(tui.config.parse_import_properties(self.properties)["motd"], "Legacy")
+        self.assertTrue(list((self.server / "backups/source-migrations").glob("*/server.properties")))
+
+    def test_cancel_migration_keeps_legacy_source(self):
+        (self.server / "server.env").write_text(
+            'MOTD="Legacy"\nOVERRIDE_SERVER_PROPERTIES="true"\n'
+        )
+        original = self.properties.read_bytes()
+        self.run_menu([
+            ["menu", "__migrate", 0], ["yesno", "", 1],
+            ["menu", "__exit", 0],
+        ])
+        self.assertEqual(tui.config.read_env(self.server / "server.env")["OVERRIDE_SERVER_PROPERTIES"], "true")
+        self.assertEqual(self.properties.read_bytes(), original)
+        self.assertFalse((self.server / "backups/source-migrations").exists())
+
+    def test_empty_backups_and_cancel_restore_do_not_change_properties(self):
+        (self.server / "server.env").write_text("OVERRIDE_SERVER_PROPERTIES=false\n")
+        original = self.properties.read_bytes()
+        self.run_menu([
+            ["menu", "__restore", 0], ["msgbox", "", 0],
+            ["menu", "__backup", 0], ["textbox", "", 0],
+            ["menu", "__restore", 0], ["menu", "@last", 0], ["yesno", "", 1],
+            ["menu", "__exit", 0],
+        ])
+        self.assertEqual(self.properties.read_bytes(), original)
+        backups = list((self.server / "backups/server-properties").glob("*.properties"))
+        self.assertEqual(len(backups), 1)
 
 if __name__ == "__main__":
     unittest.main()

@@ -267,6 +267,40 @@ edit_all_properties() {
   fi
 }
 
+migrate_properties_source() {
+  [[ "$manual_properties" != true ]] || return 0
+  whiptail --title "$SERVER_ID" --yesno "$(tr properties.tui_migrate_confirm)" 13 82 || return 0
+  run_checked "${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" properties migrate
+  manual_properties=true
+  changed=true
+}
+
+backup_properties() {
+  [[ "$manual_properties" == true ]] || return 0
+  run_checked "${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" properties backup
+}
+
+restore_properties() {
+  local listing backup_id selected
+  local items=()
+  [[ "$manual_properties" == true ]] || return 0
+  if ! listing="$("${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" properties backups 2>&1)"; then
+    whiptail --title "$(tr common.error)" --msgbox "$listing" 14 82 || true
+    return 0
+  fi
+  if [[ -z "$listing" ]]; then
+    whiptail --title "$SERVER_ID" --msgbox "$(tr properties.tui_no_backups)" 10 78 || true
+    return 0
+  fi
+  while IFS= read -r backup_id; do
+    [[ -n "$backup_id" ]] && items+=("$backup_id" "$(tr properties.tui_snapshot)")
+  done <<<"$listing"
+  selected="$(whiptail --title "$SERVER_ID" --menu "$(tr properties.tui_choose_backup)" 20 96 12 "${items[@]}" 3>&1 1>&2 2>&3)" || return 0
+  whiptail --title "$SERVER_ID" --yesno "$(tr properties.tui_restore_confirm "$selected")" 13 84 || return 0
+  run_checked "${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" properties restore "$selected"
+  changed=true
+}
+
 main() {
   local selected source_mode
   local items
@@ -311,16 +345,27 @@ main() {
       PVP "$(menu_item "$(tr properties.pvp)" "$(setting_get PVP true)")"
       VIEW_DISTANCE "$(menu_item "$(tr properties.view_distance)" "$(setting_get VIEW_DISTANCE 10)")"
       SIMULATION_DISTANCE "$(menu_item "$(tr properties.simulation_distance)" "$(setting_get SIMULATION_DISTANCE 10)")"
-      __all "$(tr properties.editor.title)"
       __more "$(tr properties.more_settings)"
       __resource "$(tr properties.resource_pack_settings)"
       __import "$(tr properties.import)"
-      __exit "$(tr properties.exit)"
     )
+    if [[ "$manual_properties" == true ]]; then
+      items+=(
+        __all "$(tr properties.editor.title)"
+        __backup "$(tr properties.tui_backup)"
+        __restore "$(tr properties.tui_restore)"
+      )
+    else
+      items+=(__migrate "$(tr properties.tui_migrate)")
+    fi
+    items+=(__exit "$(tr properties.exit)")
     selected="$(whiptail --title "${SERVER_ID}" --menu "$(tr properties.choose)" 25 94 18 "${items[@]}" 3>&1 1>&2 2>&3)" || break
     case "$selected" in
       __exit) break ;;
       __all) edit_all_properties ;;
+      __migrate) migrate_properties_source ;;
+      __backup) backup_properties ;;
+      __restore) restore_properties ;;
       __import) import_properties || true ;;
       __more)
         selected="$(whiptail --title "${SERVER_ID}" --menu "$(tr properties.more_settings)" 24 90 15 \
