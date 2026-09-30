@@ -15,3 +15,7 @@ Thumbs.db
 # 一時ファイル
 *.tmp
 *.bak
+
+# Pythonの実行時キャッシュ
+__pycache__/
+*.pyc

@@ -39,6 +39,7 @@ class DialogTests(unittest.TestCase):
 
     def test_display_width_and_blank_lines(self):
         self.assertEqual(ui.clipped("日本abc", 5), "日本a")
+        self.assertEqual(ui.display_width("日本abc"), 7)
         self.assertEqual(ui.lines("a\n\nb", 10), ["a", "", "b"])
         self.assertEqual(ui.clipped("\x1btest", 20), "test")
 

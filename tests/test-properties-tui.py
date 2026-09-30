@@ -108,6 +108,16 @@ class EditorTests(unittest.TestCase):
         with patch.object(tui.subprocess, "run", return_value=subprocess.CompletedProcess([], 255, "")):
             self.assertIsNone(editor.dialog("menu", "Choose"))
 
+    def test_session_selection_uses_persistent_renderer(self):
+        editor = tui.Editor("demo", self.server, SHARE, "ja")
+        result = subprocess.CompletedProcess([], 0, "", "motd")
+        with patch.dict(os.environ, {"MCSERVER_KIT_TUI_SOCKET": "/tmp/test-socket"}):
+            with patch.object(tui.subprocess, "run", return_value=result) as run:
+                self.assertEqual(editor.dialog("menu", "Choose", "motd", "Message"), "motd")
+        command = run.call_args.args[0]
+        self.assertEqual(command[1:3], [str(tui.HERE / "tui-session.py"), "client"])
+        self.assertNotIn("--output-fd", command)
+
     def test_actual_cli_backup_and_running_refusal(self):
         (self.server / "compose.yaml").write_text("services: {}\n")
         (self.server / "server.env").write_text("OVERRIDE_SERVER_PROPERTIES=false\n")

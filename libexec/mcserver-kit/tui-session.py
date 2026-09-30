@@ -36,6 +36,12 @@ def clipped(text: str, width: int) -> str:
     return "".join(result)
 
 
+def display_width(text: str) -> int:
+    return sum(0 if unicodedata.combining(char) else
+               (2 if unicodedata.east_asian_width(char) in "WF" else 1)
+               for char in text if not unicodedata.category(char).startswith("C"))
+
+
 def lines(text: str, width: int) -> list[str]:
     result = []
     for paragraph in text.split("\n"):
@@ -237,9 +243,14 @@ class Session:
         if kind in ("menu", "radiolist"):
             visible = max(1, height - row - 4)
             first = max(0, self.index - visible + 1)
+            tag_width = max((display_width(item[0]) for item in dialog["items"]), default=0)
+            description_width = max((display_width(item[1]) for item in dialog["items"]), default=0)
+            block_width = tag_width + 2 + description_width
+            column = max(4, (width - block_width) // 2)
             for number, item in enumerate(dialog["items"][first:first + visible]):
                 position = first + number
-                self.put(row + number, 4, f"{item[0]}  {item[1]}",
+                label = item[0] + " " * (tag_width - display_width(item[0]) + 2) + item[1]
+                self.put(row + number, column, label,
                          selected_attr if position == self.index else 0)
         elif kind in ("inputbox", "passwordbox"):
             visible = self.value if kind == "inputbox" else "*" * len(self.value)
@@ -250,9 +261,16 @@ class Session:
             start = self.cursor - len(prefix)
             entry = visible[start:self.cursor] + "│" + visible[self.cursor:]
             self.put(row, 4, "[" + entry + "]", selected_attr if self.focus == 0 else 0)
-        self.put(height - 3, 4, self.message("ok"), selected_attr if not self.focus else 0)
-        if kind not in ("msgbox", "textbox"):
-            self.put(height - 3, width // 2, self.message("cancel"), selected_attr if self.focus else 0)
+        ok = self.message("ok")
+        cancel = self.message("cancel")
+        if kind in ("msgbox", "textbox"):
+            self.put(height - 3, max(3, (width - display_width(ok)) // 2), ok, selected_attr)
+        else:
+            button_width = display_width(ok) + 6 + display_width(cancel)
+            button_start = max(3, (width - button_width) // 2)
+            self.put(height - 3, button_start, ok, selected_attr if not self.focus else 0)
+            self.put(height - 3, button_start + display_width(ok) + 6,
+                     cancel, selected_attr if self.focus else 0)
         self.put(height - 2, 3, self.message("hint"))
         self.screen.refresh()
 

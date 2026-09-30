@@ -124,8 +124,13 @@ run_and_show() {
   shift
   local output result=0
   new_temp_file output
-  whiptail --title "$title" --infobox "$(tr home.processing '⠋' "$title")" 8 72
-  "$@" >"$output" 2>&1 || result=$?
+  if [[ -n "${MCSERVER_KIT_TUI_SOCKET:-}" ]]; then
+    whiptail --title "$title" --infobox "$(tr home.processing '⠋' "$title")" 8 72
+    "$@" >"$output" 2>&1 || result=$?
+  else
+    python3 "${SCRIPT_DIR}/tui-progress.py" --output "$output" --title "$title" \
+      --message "$(tr home.processing '{spinner}' "$title")" -- "$@" || result=$?
+  fi
   if [[ ! -s "$output" ]]; then
     if ((result == 0)); then
       tr home.completed >"$output"

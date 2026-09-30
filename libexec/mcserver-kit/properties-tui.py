@@ -41,16 +41,19 @@ class Editor:
 
     def dialog(self, kind: str, prompt: str, *args: str) -> str | None:
         dimensions = ["22", "90", "14"] if kind == "menu" else ["14", "90"]
+        session = os.environ.get("MCSERVER_KIT_TUI_SOCKET")
+        command = ([sys.executable, str(HERE / "tui-session.py"), "client"]
+                   if session else ["whiptail", "--output-fd", "1"])
         result = subprocess.run(
-            ["whiptail", "--output-fd", "1", "--title", self.server_id,
-             f"--{kind}", prompt, *dimensions, *args],
-            stdout=subprocess.PIPE, text=True, check=False,
+            [*command, "--title", self.server_id, f"--{kind}", prompt, *dimensions, *args],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE if session else None,
+            text=True, check=False,
         )
         if result.returncode in (1, 255):
             return None
         if result.returncode != 0:
             raise RuntimeError(f"whiptail exited with status {result.returncode}")
-        return result.stdout
+        return result.stderr if session else result.stdout
 
     def values(self) -> dict[str, str]:
         return config.parse_import_properties(self.server_dir / "data/server.properties")
