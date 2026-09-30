@@ -81,6 +81,57 @@ class DialogTests(unittest.TestCase):
                 os.environ["MCSERVER_KIT_LANG"] = "en_US"
                 self.assertEqual(ui.startup_language(), "en")
 
+    def test_menu_columns_and_buttons_recenter_on_resize(self):
+        class Screen:
+            def __init__(self, width):
+                self.width = width
+                self.calls = []
+
+            def getmaxyx(self):
+                return 30, self.width
+
+            def erase(self):
+                self.calls = []
+
+            def box(self):
+                pass
+
+            def refresh(self):
+                pass
+
+            def addstr(self, row, column, value, attr):
+                self.calls.append((row, column, value, attr))
+
+        session = object.__new__(ui.Session)
+        session.screen = Screen(100)
+        session.messages = {"tui.session.ok": "< OK >", "tui.session.cancel": "< Cancel >",
+                            "tui.session.hint": "Use arrows", "tui.session.small": "Too small"}
+        session.dialog = {"kind": "menu", "prompt": "Choose", "items":
+                          [["start", "起動"], ["open-server", "サーバーを開く"]]}
+        session.title = "Servers"
+        session.index = session.scroll = session.focus = 0
+        with patch.object(ui.curses, "has_colors", return_value=False):
+            session.draw()
+            first = [call for call in session.screen.calls
+                     if call[2].startswith(("start ", "open-server "))]
+            self.assertEqual(len(first), 2)
+            self.assertEqual(first[0][1], first[1][1])
+            self.assertEqual(
+                ui.display_width(first[0][2].split("起動")[0]),
+                ui.display_width(first[1][2].split("サーバーを開く")[0]),
+            )
+            self.assertGreater(first[0][1], 4)
+            buttons = [call for call in session.screen.calls
+                       if call[2] in ("< OK >", "< Cancel >")]
+            self.assertEqual(len(buttons), 2)
+            self.assertLess(buttons[0][1], 50)
+            self.assertGreater(buttons[1][1], 50)
+            old_column = first[0][1]
+            session.screen.width = 120
+            session.draw()
+            resized = [call for call in session.screen.calls if call[2].startswith("start ")]
+            self.assertEqual(resized[0][1], old_column + 10)
+
 
 class TerminalTests(unittest.TestCase):
     def run_terminal(self, body, interact, expected_status=0):
