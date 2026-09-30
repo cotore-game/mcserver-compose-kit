@@ -188,9 +188,39 @@ mcserver-kit server <server-id> properties
 
 The editor covers MOTD, difficulty, game mode, player limit, online mode, whitelist, operators, flight, command blocks, PvP, view and simulation distance, spawn protection, Nether and entity spawning, and resource packs.
 
-Normally, `server.env` is the source of truth for settings managed by the toolkit. Docker Compose passes these values to `itzg/minecraft-server`, which applies them to `server.properties` when the container starts.
+New servers use `data/server.properties` as the source of truth from creation, before the first start. `server.env` keeps whitelist/operator membership settings and disables itzg property overrides with `OVERRIDE_SERVER_PROPERTIES=false`. Version, memory, and other container settings remain in `.env` and Compose. Existing servers keep their previous settings until explicitly migrated.
 
-For a distributed `server.properties`, stop the server and choose **Server settings → Import server.properties**, or run `mcserver-kit server <server-id> import-properties /path/to/server.properties`. On WSL, the settings screen offers a Windows file picker when Windows dialogs are enabled. The existing data file is backed up before replacement. Supported properties are imported into `server.env`; additional keys are stored in `CUSTOM_SERVER_PROPERTIES`. `server.env` remains the source of truth, and the imported file is also copied to `data/server.properties`. Java Properties escapes such as `\:` are decoded. If the distributed `level-name` differs, the toolkit keeps its existing `data/world` layout and Compose's `LEVEL=world` setting. A nonstandard server port or malformed property is rejected before changing the server. Do not edit the file while the server is running.
+An existing server can be migrated so that `data/server.properties` becomes the source of truth. Stop the server first, then run:
+
+```bash
+mcserver-kit server <server-id> properties migrate
+```
+
+The migration preserves the effective values from `server.env`, `CUSTOM_SERVER_PROPERTIES`, Compose, and the existing file. It stores the previous files under `backups/source-migrations/`, disables itzg property overrides, and keeps whitelist and operator membership settings separate. The CLI can then manage every Minecraft or mod property by its original key:
+
+```bash
+mcserver-kit server <server-id> properties list
+mcserver-kit server <server-id> properties get motd
+mcserver-kit server <server-id> properties set motd "My server"
+mcserver-kit server <server-id> properties add mod.custom-key value
+mcserver-kit server <server-id> properties remove mod.custom-key
+mcserver-kit server <server-id> properties backup
+mcserver-kit server <server-id> properties backups
+mcserver-kit server <server-id> properties restore <backup-id>
+mcserver-kit server <server-id> properties import /path/to/server.properties
+```
+
+Mutating commands require the server to be stopped and create a snapshot before changing the file. Backups are stored under `backups/server-properties/`. A restore also backs up the file it replaces.
+
+For new or migrated servers, imports replace `data/server.properties` and preserve its authority. The managed layout keeps `level-name=world` and `server-port=25565`.
+
+Open `mcserver-kit server <server-id> properties` and choose **All server.properties keys** to browse the file using Minecraft's original key names. Select a key to view, edit, or remove it; **Add a key** offers described suggestions and manual entry for other keys, including mod settings. Cancel returns to the previous menu. Saved changes and confirmed removals use the CLI's stop check and automatic backup. Removing a key may let Minecraft recreate its default at the next startup.
+
+The description catalog currently covers 25 common keys in English and Japanese, not every setting of every Minecraft version. Unlisted keys remain editable. Values are entered as text; this editor does not yet validate all version-specific types or ranges. Password fields are masked. Unmigrated servers must run `properties migrate` before using this editor.
+
+New servers also receive a random RCON password. `ENABLE_RCON`, `RCON_PORT`, and `RCON_PASSWORD` in `server.env` are derived client settings for itzg, not independent inputs. Use the properties commands when changing RCON settings: edits, imports, and restores refresh these values. Recreate the container with `docker compose up -d` to reload changed environment values. Editing RCON properties externally and running `docker compose restart` does not refresh this client configuration.
+
+For an unmigrated server using a distributed `server.properties`, stop the server and choose **Server settings → Import server.properties**, or run `mcserver-kit server <server-id> import-properties /path/to/server.properties`. On WSL, the settings screen offers a Windows file picker when Windows dialogs are enabled. The existing data file is backed up before replacement. Supported properties are imported into `server.env`; additional keys are stored in `CUSTOM_SERVER_PROPERTIES`. `server.env` remains the source of truth, and the imported file is also copied to `data/server.properties`. Java Properties escapes such as `\:` are decoded. If the distributed `level-name` differs, the toolkit keeps its existing `data/world` layout and Compose's `LEVEL=world` setting. A nonstandard server port or malformed property is rejected before changing the server. Do not edit the file while the server is running.
 
 The dashboard can also open the server folder or its persistent `data/` folder in Windows Explorer. From a terminal, use `mcserver-kit server <server-id> open server` or `open data`. This requires WSL interop with Explorer.
 

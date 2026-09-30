@@ -248,6 +248,9 @@ import_properties() {
     if [[ -s "$output" ]]; then
       whiptail --title "$(tr properties.import)" --textbox "$output" 16 82
       manual_properties=false
+      if [[ "$(python3 "$CONFIG_TOOL" source-mode "$SERVER_DIR")" == properties ]]; then
+        manual_properties=true
+      fi
       changed=true
     fi
   else
@@ -259,16 +262,36 @@ import_properties() {
   rm -f -- "$output"
 }
 
+edit_all_properties() {
+  local status
+  if [[ "$manual_properties" != true ]]; then
+    whiptail --msgbox "$(tr properties.migrate_first)" 12 82 || true
+    return 0
+  fi
+  if python3 "${SCRIPT_DIR}/properties-tui.py" "$SERVER_ID" "$SERVER_DIR"; then
+    return 0
+  else
+    status=$?
+    # 10 means saved changes; other errors have already been shown by the editor.
+    [[ "$status" != 10 ]] || changed=true
+  fi
+}
+
 main() {
-  local selected
+  local selected source_mode
   local items
   command -v whiptail >/dev/null 2>&1 || die "$(tr properties.whiptail_missing)"
   [[ -f "${SERVER_DIR}/compose.yaml" ]] || die "$(tr server.compose_missing "$SERVER_ID")"
 
   if [[ ! -f "$SERVER_ENV" ]]; then
     whiptail --yesno "$(tr properties.migration_prompt)" 11 76 || return 0
+    run_checked python3 "$CONFIG_TOOL" migrate "$SERVER_DIR"
+  else
+    source_mode="$(python3 "$CONFIG_TOOL" source-mode "$SERVER_DIR")" || die "$(tr properties.source_check_failed)"
+    if [[ "$source_mode" == environment ]]; then
+      run_checked python3 "$CONFIG_TOOL" migrate "$SERVER_DIR"
+    fi
   fi
-  run_checked python3 "$CONFIG_TOOL" migrate "$SERVER_DIR"
   if [[ "$(python3 "$CONFIG_TOOL" get "$SERVER_ENV" OVERRIDE_SERVER_PROPERTIES true)" == false ]]; then
     [[ -f "$SERVER_PROPERTIES" ]] || die "$(tr properties.file_missing)"
     local running
@@ -298,6 +321,7 @@ main() {
       PVP "$(menu_item "$(tr properties.pvp)" "$(setting_get PVP true)")"
       VIEW_DISTANCE "$(menu_item "$(tr properties.view_distance)" "$(setting_get VIEW_DISTANCE 10)")"
       SIMULATION_DISTANCE "$(menu_item "$(tr properties.simulation_distance)" "$(setting_get SIMULATION_DISTANCE 10)")"
+      __all "$(tr properties.editor.title)"
       __more "$(tr properties.more_settings)"
       __resource "$(tr properties.resource_pack_settings)"
       __import "$(tr properties.import)"
@@ -306,6 +330,7 @@ main() {
     selected="$(whiptail --title "${SERVER_ID}" --menu "$(tr properties.choose)" 25 94 18 "${items[@]}" 3>&1 1>&2 2>&3)" || break
     case "$selected" in
       __exit) break ;;
+      __all) edit_all_properties ;;
       __import) import_properties || true ;;
       __more)
         selected="$(whiptail --title "${SERVER_ID}" --menu "$(tr properties.more_settings)" 24 90 15 \

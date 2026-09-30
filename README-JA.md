@@ -189,9 +189,39 @@ mcserver-kit server <server-id> properties
 
 MOTD、難易度、ゲームモード、最大人数、オンラインモード、ホワイトリスト、OP、飛行、コマンドブロック、PvP、描画・シミュレーション距離、スポーン保護、ネザー、Mob/NPC生成、リソースパックなどを編集できます。
 
-通常、ツールが管理する設定の正本は各サーバーの`server.env`です。Docker Composeが値を`itzg/minecraft-server`へ渡し、コンテナ起動時に`server.properties`へ反映します。
+新規サーバーは初回起動前の作成時点から`data/server.properties`を正本として使います。`server.env`にはホワイトリスト・OPのメンバー管理設定を残し、`OVERRIDE_SERVER_PROPERTIES=false`でitzgによるプロパティ上書きを止めます。バージョン・メモリ等のコンテナ設定は`.env`とComposeで管理します。既存サーバーは明示的に移行するまで従来の設定方式を維持します。
 
-配布された`server.properties`を使う場合は、サーバーを停止して「サーバー設定 → server.propertiesをインポート」を選ぶか、`mcserver-kit server <server-id> import-properties /path/to/server.properties`を実行します。Windowsダイアログを有効にしているWSL環境では、設定画面からWindowsのファイル選択画面を開けます。既存のデータファイルは置換前にバックアップします。対応する項目を`server.env`へ取り込み、その他のキーは`CUSTOM_SERVER_PROPERTIES`へ保存します。設定の正本は引き続き`server.env`で、元ファイルも`data/server.properties`へコピーします。`\:`などJava Propertiesのエスケープを解釈します。配布ファイルの`level-name`が異なっても、ワールドの配置は`data/world`、Composeの設定は`LEVEL=world`のままです。ポートが異なる場合や書式が不正な場合は変更前にエラーにします。サーバー起動中にファイルを直接編集しないでください。
+既存サーバーは、`data/server.properties`を正本とする方式へ移行できます。先にサーバーを停止し、次を実行します。
+
+```bash
+mcserver-kit server <サーバーID> properties migrate
+```
+
+移行時は`server.env`、`CUSTOM_SERVER_PROPERTIES`、Compose、既存ファイルの実効値を引き継ぎます。変更前のファイルは`backups/source-migrations/`へ保存し、itzgによるプロパティ上書きを無効化します。ホワイトリストとOPのメンバー管理はプロパティと分離して保持します。移行後は、MinecraftやMODの元のキー名で全項目をCLI操作できます。
+
+```bash
+mcserver-kit server <サーバーID> properties list
+mcserver-kit server <サーバーID> properties get motd
+mcserver-kit server <サーバーID> properties set motd "My server"
+mcserver-kit server <サーバーID> properties add mod.custom-key value
+mcserver-kit server <サーバーID> properties remove mod.custom-key
+mcserver-kit server <サーバーID> properties backup
+mcserver-kit server <サーバーID> properties backups
+mcserver-kit server <サーバーID> properties restore <バックアップID>
+mcserver-kit server <サーバーID> properties import /path/to/server.properties
+```
+
+変更を伴うコマンドはサーバーの停止を要求し、変更前にスナップショットを作成します。バックアップは`backups/server-properties/`へ保存します。復元時にも、置換される現在のファイルを先にバックアップします。
+
+新規作成・移行済みのサーバーでは、インポートは`data/server.properties`を置換し、正本の管理方式を維持します。ワールド配置とポートの制約として`level-name=world`、`server-port=25565`を保持します。
+
+`mcserver-kit server <サーバーID> properties`から「server.propertiesの全キー」を選ぶと、Minecraft本来のキー名でファイル内の全項目を閲覧・編集・削除できます。「キーを追加」には説明付き候補と、MOD設定などの手入力を用意しています。キャンセルで前のメニューに戻ります。保存・確認後の削除はCLIと同じ停止確認と自動バックアップを通します。削除したキーは、次の起動時にMinecraftが既定値で再生成する場合があります。
+
+説明カタログは現在、主要25項目の英日対応です。全バージョンの全項目を網羅した一覧ではありませんが、未登録キーも編集できます。値は文字列で入力し、バージョンごとの型・範囲の検証はまだ行いません。パスワードは伏せ字で表示します。未移行のサーバーは先に`properties migrate`が必要です。
+
+新規作成時はランダムなRCONパスワードも生成します。`server.env`の`ENABLE_RCON`・`RCON_PORT`・`RCON_PASSWORD`は、プロパティから生成するitzg側クライアント用の値です。RCONの変更にはプロパティ操作コマンドを使ってください。編集・インポート・復元時にこれらの値も更新します。変更した環境変数は`docker compose up -d`でコンテナを再作成して反映します。外部エディターによるRCON設定変更と`docker compose restart`だけでは、このクライアント設定は更新されません。
+
+未移行のサーバーで配布された`server.properties`を使う場合は、サーバーを停止して「サーバー設定 → server.propertiesをインポート」を選ぶか、`mcserver-kit server <server-id> import-properties /path/to/server.properties`を実行します。Windowsダイアログを有効にしているWSL環境では、設定画面からWindowsのファイル選択画面を開けます。既存のデータファイルは置換前にバックアップします。対応する項目を`server.env`へ取り込み、その他のキーは`CUSTOM_SERVER_PROPERTIES`へ保存します。設定の正本は引き続き`server.env`で、元ファイルも`data/server.properties`へコピーします。`\:`などJava Propertiesのエスケープを解釈します。配布ファイルの`level-name`が異なっても、ワールドの配置は`data/world`、Composeの設定は`LEVEL=world`のままです。ポートが異なる場合や書式が不正な場合は変更前にエラーにします。サーバー起動中にファイルを直接編集しないでください。
 
 ホーム画面からサーバーフォルダ、または永続データの`data/`をWindowsのExplorerで開けます。コマンドでは`mcserver-kit server <server-id> open server`または`open data`です。WSLとExplorerの連携が必要です。
 
