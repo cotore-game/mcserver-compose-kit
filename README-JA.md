@@ -222,17 +222,17 @@ mcserver-kit server <サーバーID> properties import /path/to/server.propertie
 
 `mcserver-kit server <サーバーID> properties`から「server.propertiesの全キー」を選ぶと、Minecraft本来のキー名でファイル内の全項目を閲覧・編集・削除できます。「キーを追加」には説明付き候補と、MOD設定などの手入力を用意しています。キャンセルで前のメニューに戻ります。よく使う設定と全キー編集のどちらも、プロパティ変更時はCLIと同じ停止確認と自動バックアップを通します。削除したキーは、次の起動時にMinecraftが既定値で再生成する場合があります。
 
-同じ設定メニューから、古いサーバーでは「data/server.propertiesを正本にする」を選べます。移行後は「server.propertiesをバックアップ」「server.propertiesを復元」も利用できます。復元時は一覧からスナップショットを選んで確認し、現在のファイルをバックアップしてから置換します。移行・復元の前にサーバーを停止してください。
+旧サーバーの設定画面を開くと、`data/server.properties`を直接正本にする一段階の移行を確認します。先にサーバーを停止してください。移行前のCompose・環境設定・プロパティはバックアップします。移行後は「server.propertiesをバックアップ」「server.propertiesを復元」を利用でき、復元時も現在のファイルを退避してから置換します。
 
-説明カタログは現在、主要25項目の英日対応です。全バージョンの全項目を網羅した一覧ではありませんが、未登録キーも編集できます。値は文字列で入力し、バージョンごとの型・範囲の検証はまだ行いません。パスワードは伏せ字で表示します。未移行のサーバーは先に`properties migrate`が必要です。
+説明カタログは現在、主要25項目の英日対応です。全バージョンの全項目を網羅した一覧ではありませんが、未登録キーも編集できます。値は文字列で入力し、バージョンごとの型・範囲の検証はまだ行いません。パスワードは伏せ字で表示します。旧サーバーの設定画面では、全キー編集の前に移行を確認します。
 
 新規作成時はランダムなRCONパスワードも生成します。`server.env`の`ENABLE_RCON`・`RCON_PORT`・`RCON_PASSWORD`は、プロパティから生成するitzg側クライアント用の値です。RCONの変更にはプロパティ操作コマンドを使ってください。編集・インポート・復元時にこれらの値も更新します。変更した環境変数は`docker compose up -d`でコンテナを再作成して反映します。外部エディターによるRCON設定変更と`docker compose restart`だけでは、このクライアント設定は更新されません。
 
-未移行のサーバーで配布された`server.properties`を使う場合は、サーバーを停止して「サーバー設定 → server.propertiesをインポート」を選ぶか、`mcserver-kit server <server-id> import-properties /path/to/server.properties`を実行します。Windowsダイアログを有効にしているWSL環境では、設定画面からWindowsのファイル選択画面を開けます。既存のデータファイルは置換前にバックアップします。対応する項目を`server.env`へ取り込み、その他のキーは`CUSTOM_SERVER_PROPERTIES`へ保存します。設定の正本は引き続き`server.env`で、元ファイルも`data/server.properties`へコピーします。`\:`などJava Propertiesのエスケープを解釈します。配布ファイルの`level-name`が異なっても、ワールドの配置は`data/world`、Composeの設定は`LEVEL=world`のままです。ポートが異なる場合や書式が不正な場合は変更前にエラーにします。サーバー起動中にファイルを直接編集しないでください。
+配布された`server.properties`を使う場合は、サーバーを停止して「サーバー設定 → server.propertiesをインポート」を選ぶか、`mcserver-kit server <server-id> import-properties /path/to/server.properties`を実行します。Windowsダイアログを有効にしているWSL環境ではファイル選択画面を開けます。旧サーバーはインポート前に直接`data/server.properties`正本へ移行し、以前の設定とファイルをバックアップします。配布ファイルは未知のキーも含めて正本となり、`\:`などJava Propertiesのエスケープも扱えます。`level-name=world`と`data/world`の配置を維持し、ポートが異なる場合や書式が不正な場合は移行・インポート前にエラーにします。
 
 ホーム画面からサーバーフォルダ、または永続データの`data/`をWindowsのExplorerで開けます。コマンドでは`mcserver-kit server <server-id> open server`または`open data`です。WSLとExplorerの連携が必要です。
 
-古い形式のサーバーを初めて開く場合は、移行前に確認画面を表示します。元のComposeは`compose.yaml.mcserver-kit.bak`として保存します。
+古い形式のサーバーを初めて開く場合は、移行前に確認画面を表示します。元の設定ファイルは`backups/source-migrations/`に保存します。
 
 ## MCIDテンプレート
 
