@@ -82,22 +82,19 @@ load_messages() {
 
 load_catalog() {
   local catalog="$1"
-  local key encoded decoded
-  while IFS=$'\t' read -r key encoded; do
-    [[ -n "$key" ]] || continue
-    # The sentinel prevents command substitution from stripping translated newlines.
-    decoded="$(printf '%s' "$encoded" | base64 --decode; printf '\034')"
-    I18N_MESSAGES["$key"]="${decoded%$'\034'}"
+  local key value
+  # NUL-delimited pairs preserve translated newlines without a decoder process
+  # for every message. Bash arrays cannot store NUL bytes in values.
+  while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+    I18N_MESSAGES["$key"]="$value"
   done < <(python3 - "$catalog" <<'PYTHON'
-import base64
 import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as file:
     messages = json.load(file)
 for key, value in messages.items():
-    encoded = base64.b64encode(value.encode("utf-8")).decode("ascii")
-    print(f"{key}\t{encoded}")
+    sys.stdout.buffer.write(key.encode("utf-8") + b"\0" + value.encode("utf-8") + b"\0")
 PYTHON
   )
 }
