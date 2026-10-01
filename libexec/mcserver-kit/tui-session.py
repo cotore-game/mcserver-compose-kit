@@ -216,6 +216,17 @@ class Session:
             except curses.error:
                 pass
 
+    def draw_scrollbar(self, top, visible, total, first):
+        """Show where the visible rows are within a longer menu or result."""
+        if total <= visible or visible < 2:
+            return
+        width = self.screen.getmaxyx()[1]
+        size = max(1, round(visible * visible / total))
+        first = min(max(first, 0), total - visible)
+        position = round((visible - size) * first / (total - visible))
+        for row in range(visible):
+            self.put(top + row, width - 3, "█" if position <= row < position + size else "│")
+
     def draw(self):
         height, width = self.screen.getmaxyx()
         # erase + refresh lets curses diff frames; never clear/reset the terminal.
@@ -233,11 +244,15 @@ class Session:
         dialog = self.dialog
         kind = dialog["kind"]
         content = lines(dialog["prompt"], width - 8)
+        total_lines = len(content)
         limit = min(len(content), max(3, height // 3)) if kind in ("menu", "radiolist", "inputbox", "passwordbox") else height - 7
         if kind in ("textbox", "msgbox", "yesno"):
+            self.scroll = min(self.scroll, max(0, total_lines - limit))
             content = content[self.scroll:]
         for number, text in enumerate(content[:limit]):
             self.put(3 + number, 4, text)
+        if kind in ("textbox", "msgbox"):
+            self.draw_scrollbar(3, limit, total_lines, self.scroll)
         row = 4 + min(limit, len(content))
         selected_attr = curses.color_pair(1) if curses.has_colors() else curses.A_REVERSE
         if kind in ("menu", "radiolist"):
@@ -250,8 +265,9 @@ class Session:
             for number, item in enumerate(dialog["items"][first:first + visible]):
                 position = first + number
                 label = item[0] + " " * (tag_width - display_width(item[0]) + 2) + item[1]
-                self.put(row + number, column, label,
+                self.put(row + number, column, clipped(label, max(1, width - column - 5)),
                          selected_attr if position == self.index else 0)
+            self.draw_scrollbar(row, visible, len(dialog["items"]), first)
         elif kind in ("inputbox", "passwordbox"):
             visible = self.value if kind == "inputbox" else "*" * len(self.value)
             # Keep the insertion point visible for long input, including Japanese.

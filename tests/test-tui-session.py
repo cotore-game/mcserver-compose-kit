@@ -132,6 +132,59 @@ class DialogTests(unittest.TestCase):
             resized = [call for call in session.screen.calls if call[2].startswith("start ")]
             self.assertEqual(resized[0][1], old_column + 10)
 
+    def test_scrollbar_tracks_selection_and_hides_when_all_items_fit(self):
+        class Screen:
+            def __init__(self):
+                self.height = 16
+                self.width = 60
+                self.calls = []
+
+            def getmaxyx(self):
+                return self.height, self.width
+
+            def erase(self):
+                self.calls = []
+
+            def box(self):
+                pass
+
+            def refresh(self):
+                pass
+
+            def addstr(self, row, column, value, attr):
+                self.calls.append((row, column, value, attr))
+
+        session = object.__new__(ui.Session)
+        session.screen = Screen()
+        session.messages = {"tui.session.ok": "OK", "tui.session.cancel": "Cancel",
+                            "tui.session.hint": "Arrows", "tui.session.small": "Small"}
+        session.dialog = {"kind": "menu", "prompt": "Choose", "items":
+                          [[str(index), "Item"] for index in range(20)]}
+        session.title = "Servers"
+        session.index = session.scroll = session.focus = 0
+        with patch.object(ui.curses, "has_colors", return_value=False):
+            session.draw()
+            first = [row for row, column, value, _ in session.screen.calls
+                     if column == 57 and value == "█"]
+            self.assertTrue(first)
+            session.index = 19
+            session.draw()
+            last = [row for row, column, value, _ in session.screen.calls
+                    if column == 57 and value == "█"]
+            self.assertGreater(min(last), min(first))
+            session.screen.height = 45
+            session.draw()
+            self.assertFalse([value for _, column, value, _ in session.screen.calls
+                              if column == 57 and value in ("█", "│")])
+
+        session.screen.height = 16
+        session.dialog = {"kind": "textbox", "prompt": "\n".join(str(i) for i in range(20))}
+        session.scroll = 10
+        with patch.object(ui.curses, "has_colors", return_value=False):
+            session.draw()
+        self.assertTrue([value for _, column, value, _ in session.screen.calls
+                         if column == 57 and value == "█"])
+
 
 class TerminalTests(unittest.TestCase):
     def run_terminal(self, body, interact, expected_status=0):
