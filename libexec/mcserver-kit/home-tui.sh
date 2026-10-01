@@ -12,6 +12,9 @@ ROOT_DIR="${MCSERVER_KIT_ROOT:-$(cd -- "${SCRIPT_DIR}/../.." && pwd)}"
 CONFIG_VALUE="${SCRIPT_DIR}/config-value.py"
 VERSION="$(head -n 1 "${ROOT_DIR}/VERSION" 2>/dev/null || printf unknown)"
 TEMP_FILES=()
+SERVER_LISTING=''
+SERVER_LISTING_AT=0
+SERVER_LISTING_VALID=false
 
 # shellcheck source=libexec/mcserver-kit/i18n.sh
 source "${SCRIPT_DIR}/i18n.sh"
@@ -43,6 +46,22 @@ server_root() {
   printf '%s' "$configured"
 }
 
+refresh_server_listing() {
+  local listing
+  listing="$("${SCRIPT_DIR}/server-manager.sh" list --raw)" || return 1
+  SERVER_LISTING="$listing"
+  SERVER_LISTING_AT=$SECONDS
+  SERVER_LISTING_VALID=true
+}
+
+ensure_server_listing() {
+  # Reuse the home snapshot on an immediate transition to Servers. Refresh
+  # after a few seconds or after any action that might change container state.
+  if [[ "$SERVER_LISTING_VALID" != true ]] || ((SECONDS - SERVER_LISTING_AT >= 3)); then
+    refresh_server_listing
+  fi
+}
+
 tool_availability() {
   if command -v "$1" >/dev/null 2>&1; then
     tr home.available
@@ -72,16 +91,15 @@ LOGO
 }
 
 dashboard_text() {
-  local latest='' listing id state
+  local latest='' id state
   local total=0 running=0
-  listing="$("${SCRIPT_DIR}/server-manager.sh" list --raw 2>/dev/null || true)"
   while IFS=$'\t' read -r id state; do
     [[ -n "$id" ]] || continue
     total=$((total + 1))
     [[ "$state" != running ]] || running=$((running + 1))
-  done <<< "$listing"
+  done <<< "$SERVER_LISTING"
   logo
-  latest="$("${SCRIPT_DIR}/update.sh" --cached-quiet 2>/dev/null || true)"
+  latest="$("${SCRIPT_DIR}/update.sh" --cached-only-quiet 2>/dev/null || true)"
   printf '\n%s\n%s\n' "$(tr home.version "$VERSION")" "$(tr home.summary "$total" "$running")"
   [[ -n "$latest" ]] && printf '%s\n' "$(tr home.update_available "$latest")"
   printf '%s\n' "$(tr home.choose)"
@@ -196,20 +214,21 @@ server_action_menu() {
 }
 
 servers_menu() {
-  local root id state selected listing
+  local root id state selected
   local items=()
   root="$(server_root)"
   while true; do
     items=()
-    listing="$("${SCRIPT_DIR}/server-manager.sh" list --raw)" || return 0
+    ensure_server_listing || return 0
     while IFS=$'\t' read -r id state; do
       [[ -n "$id" ]] || continue
       items+=("$id" "$(tr "server.state_${state}")")
-    done <<< "$listing"
+    done <<< "$SERVER_LISTING"
     items+=(__back "$(tr tui.back)")
     selected="$(whiptail --title "$(tr home.servers)" --menu "$(tr home.select_server)" 23 82 15 "${items[@]}" 3>&1 1>&2 2>&3)" || return 0
     [[ "$selected" == __back ]] && return
     server_action_menu "$selected" "${root}/${selected}"
+    SERVER_LISTING_VALID=false
   done
 }
 
@@ -255,7 +274,12 @@ main() {
     printf '%s\n' "$(tr home.tty_required)" >&2
     exit 2
   }
+  # Refresh the cached release once in the background. Home uses only the
+  # existing cache; the result appears on the next menu redraw.
+  "${SCRIPT_DIR}/update.sh" --cached-quiet >/dev/null 2>&1 &
+
   while true; do
+    ensure_server_listing 2>/dev/null || true
     choice="$(whiptail --backtitle "mcserver-kit ${VERSION}" --title 'Minecraft Server Kit' --menu "$(dashboard_text)" 28 94 10 \
       servers "$(tr home.servers)" \
       create "$(tr home.create)" \
@@ -275,6 +299,7 @@ main() {
         "${SCRIPT_DIR}/create-server.sh" || true
         pause_for_enter
         tui_terminal_resume
+        SERVER_LISTING_VALID=false
         ;;
       config) "${SCRIPT_DIR}/config-tui.sh" || true ;;
       templates) "${SCRIPT_DIR}/config-tui.sh" templates || true ;;

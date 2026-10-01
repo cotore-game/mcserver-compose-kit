@@ -183,6 +183,13 @@ printf '%s' "$MCSERVER_KIT_TEST_LATEST_URL"
 CURL
   chmod +x "${fake_bin}/curl"
 
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_CURRENT_VERSION=1.1.0 \
+    MCSERVER_KIT_UPDATE_CACHE_DIR="$cache_dir" MCSERVER_KIT_TEST_CURL_COUNT="$curl_count" \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/update.sh" --cached-only-quiet)"
+  assert_equal '' "$output" 'dashboard check is empty before a cache exists'
+  assert_equal 'absent' "$([[ ! -e "$curl_count" ]] && printf absent)" \
+    'dashboard check does not fetch a missing cache synchronously'
+
   output="$(PATH="${fake_bin}:$PATH" \
     MCSERVER_KIT_CURRENT_VERSION=1.1.0 \
     MCSERVER_KIT_UPDATE_CACHE_DIR="$cache_dir" \
@@ -202,6 +209,12 @@ CURL
   assert_equal '1' "$(wc -c <"$curl_count" | tr -d ' ')" 'a fresh update cache avoids another network request'
   assert_equal '600' "$(stat -c '%a' "${cache_dir}/update-check")" 'the update cache is private'
 
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_CURRENT_VERSION=1.1.0 \
+    MCSERVER_KIT_UPDATE_CACHE_DIR="$cache_dir" MCSERVER_KIT_TEST_CURL_COUNT="$curl_count" \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/update.sh" --cached-only-quiet)"
+  assert_equal 'v1.1.1' "$output" 'dashboard displays an available cached release'
+  assert_equal '1' "$(wc -c <"$curl_count" | tr -d ' ')" 'dashboard does not repeat the network request'
+
   output="$(PATH="${fake_bin}:$PATH" \
     MCSERVER_KIT_CURRENT_VERSION=1.1.1 \
     MCSERVER_KIT_UPDATE_CACHE_DIR="${temp_dir}/update/current-cache" \
@@ -218,6 +231,13 @@ CURL
     PATH="${fake_bin}:$PATH" \
     bash "${REPO_ROOT}/libexec/mcserver-kit/update.sh" --cached-quiet >"${temp_dir}/update/newer-output"
   assert_equal 'empty' "$([[ ! -s "${temp_dir}/update/newer-output" ]] && printf empty)" 'automatic checks do not offer an older release'
+
+  printf '1\nv1.1.1\n' >"${cache_dir}/update-check"
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_CURRENT_VERSION=1.1.0 \
+    MCSERVER_KIT_UPDATE_CACHE_DIR="$cache_dir" MCSERVER_KIT_TEST_CURL_COUNT="$curl_count" \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/update.sh" --cached-only-quiet)"
+  assert_equal '' "$output" 'dashboard ignores an expired cache without waiting for refresh'
+  assert_equal '3' "$(wc -c <"$curl_count" | tr -d ' ')" 'expired dashboard cache does not trigger a network request'
 
   mkdir -p "$fake_root"
   printf '1.1.0\n' >"${fake_root}/VERSION"
@@ -519,6 +539,55 @@ WHIPTAIL
   assert_equal 'present' "$(grep -q -- '--backtitle mcserver-kit' "$whiptail_log" && printf present)" 'the home command opens the interactive dashboard'
   assert_equal 'present' "$(grep -q 'servers Servers' "$whiptail_log" && printf present)" 'the dashboard exposes server management'
   assert_equal 'present' "$(grep -Fq "Update available: $next_version" "$whiptail_log" && printf present)" 'the dashboard announces a newer cached release'
+}
+
+test_home_background_update() {
+  local temp_dir="$1"
+  local root="${temp_dir}/home-background"
+  local fake_bin="${root}/bin"
+  local config_file="${root}/config.yml"
+  local cache_dir="${root}/cache"
+  local menu_log="${root}/menu.log"
+  local start_ms elapsed_ms
+  mkdir -p "$fake_bin"
+  cat >"$config_file" <<CONFIG
+paths:
+  server_root: "${root}/servers"
+CONFIG
+  cat >"${fake_bin}/whiptail" <<'WHIPTAIL'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$MCSERVER_KIT_TEST_MENU_LOG"
+printf exit >&2
+WHIPTAIL
+  cat >"${fake_bin}/curl" <<'CURL'
+#!/usr/bin/env bash
+sleep 2
+printf '%s' 'https://github.com/cotore-game/mcserver-compose-kit/releases/tag/v1.1.1'
+CURL
+  chmod +x "${fake_bin}/whiptail" "${fake_bin}/curl"
+
+  start_ms="$(date +%s%3N)"
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_CURRENT_VERSION=1.1.0 MCSERVER_KIT_UPDATE_CACHE_DIR="$cache_dir" \
+    MCSERVER_KIT_TEST_MENU_LOG="$menu_log" MCSERVER_KIT_TUI_TEST=true \
+    bash "${REPO_ROOT}/mcserver-kit" home
+  elapsed_ms=$(($(date +%s%3N) - start_ms))
+  tests_run=$((tests_run + 1))
+  if ((elapsed_ms >= 1500)); then
+    printf 'FAIL: home waited %s ms for background update\n' "$elapsed_ms" >&2
+    return 1
+  fi
+  assert_equal 'absent' "$(grep -Fq 'Update available:' "$menu_log" && printf present || printf absent)" \
+    'home displays immediately without a new release cache'
+  sleep 2.3
+  assert_equal 'v1.1.1' "$(sed -n '2p' "${cache_dir}/update-check")" \
+    'background check refreshes the release cache'
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_CURRENT_VERSION=1.1.0 MCSERVER_KIT_UPDATE_CACHE_DIR="$cache_dir" \
+    MCSERVER_KIT_TEST_MENU_LOG="$menu_log" MCSERVER_KIT_TUI_TEST=true \
+    bash "${REPO_ROOT}/mcserver-kit" home
+  assert_equal 'present' "$(grep -Fq 'Update available: v1.1.1' "$menu_log" && printf present)" \
+    'next home redraw displays the refreshed release'
 }
 
 test_home_screen_transition_after_current_update() {
@@ -1291,6 +1360,7 @@ main() {
   test_server_property_editor "$TEST_TEMP_DIR"
   test_property_import_and_explorer "$TEST_TEMP_DIR"
   test_home_dashboard "$TEST_TEMP_DIR"
+  test_home_background_update "$TEST_TEMP_DIR"
   test_home_screen_transition_after_current_update "$TEST_TEMP_DIR"
 
   printf 'PASS: %d specification tests, %d skipped\n' "$tests_run" "$tests_skipped"

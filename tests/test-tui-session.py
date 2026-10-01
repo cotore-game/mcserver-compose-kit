@@ -286,7 +286,7 @@ mkdir -p "$TEST_UI_DIR/servers/demo" "$TEST_UI_DIR/bin" "$TEST_UI_DIR/cache"
 printf 'services: {}\\n' >"$TEST_UI_DIR/servers/demo/compose.yaml"
 printf 'paths:\\n  server_root: "%s/servers"\\n' "$TEST_UI_DIR" >"$TEST_UI_DIR/config.yml"
 printf '%s\\nv1.1.3\\n' "$(date +%s)" >"$TEST_UI_DIR/cache/update-check"
-printf '#!/bin/sh\\nsleep 0.2\\necho "[]"\\n' >"$TEST_UI_DIR/bin/docker"
+printf '#!/bin/sh\\nprintf x >> "$TEST_UI_DIR/docker-count"\\nsleep 0.2\\necho "[]"\\n' >"$TEST_UI_DIR/bin/docker"
 chmod +x "$TEST_UI_DIR/bin/docker"
 export PATH="$TEST_UI_DIR/bin:$PATH"
 export MCSERVER_KIT_CONFIG="$TEST_UI_DIR/config.yml"
@@ -295,8 +295,10 @@ exec bash """ + str(ROOT / "libexec/mcserver-kit/home-tui.sh") + """
 """
         def interact(master, workspace, output, receive):
             receive(b"Choose what you want", duration=8)
+            self.assertEqual((workspace / "docker-count").read_text(), "x")
             os.write(master, b"\r")  # Home -> server list
             receive(b"Select a server", duration=8)
+            self.assertEqual((workspace / "docker-count").read_text(), "x")
             os.write(master, b"\r")  # List -> demo
             receive(b"Current status", duration=8)
             before = len(output)
