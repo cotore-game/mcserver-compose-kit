@@ -276,7 +276,7 @@ sys.exit(status)
 """)
         whiptail.chmod(0o755)
 
-    def run_menu(self, choices, running="no"):
+    def run_menu(self, choices, running="no", expected_status=0):
         queue = self.root / "dialogs.json"
         queue.write_text(json.dumps(choices))
         environment = dict(os.environ, MCSERVER_KIT_CONFIG=str(self.config_path),
@@ -288,7 +288,7 @@ sys.exit(status)
              "demo", str(self.server)], env=environment,
             capture_output=True, text=True, timeout=30,
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, expected_status, result.stderr)
         self.assertEqual(json.loads(queue.read_text()), [])
 
     def test_backup_and_restore_from_settings_menu(self):
@@ -311,12 +311,12 @@ sys.exit(status)
             'MOTD="Legacy"\nOVERRIDE_SERVER_PROPERTIES="true"\n'
         )
         self.run_menu([
-            ["menu", "__migrate", 0], ["yesno", "", 0], ["textbox", "", 0],
-            ["menu", "__exit", 0], ["yesno", "", 1], ["msgbox", "", 0],
+            ["yesno", "", 0], ["textbox", "", 0], ["menu", "__exit", 0],
         ])
         self.assertEqual(tui.config.read_env(self.server / "server.env")["OVERRIDE_SERVER_PROPERTIES"], "false")
         self.assertEqual(tui.config.parse_import_properties(self.properties)["motd"], "Legacy")
         self.assertTrue(list((self.server / "backups/source-migrations").glob("*/server.properties")))
+        self.assertNotIn("MOTD", tui.config.read_env(self.server / "server.env"))
 
     def test_cancel_migration_keeps_legacy_source(self):
         (self.server / "server.env").write_text(
@@ -324,11 +324,39 @@ sys.exit(status)
         )
         original = self.properties.read_bytes()
         self.run_menu([
-            ["menu", "__migrate", 0], ["yesno", "", 1],
-            ["menu", "__exit", 0],
+            ["yesno", "", 1],
         ])
         self.assertEqual(tui.config.read_env(self.server / "server.env")["OVERRIDE_SERVER_PROPERTIES"], "true")
         self.assertEqual(self.properties.read_bytes(), original)
+        self.assertFalse((self.server / "backups/source-migrations").exists())
+
+    def test_server_without_environment_migrates_directly(self):
+        self.properties.write_text(
+            "motd=Original\nlevel-name=world\nserver-port=25565\n"
+            "enable-rcon=true\nrcon.password=legacy-secret\n"
+        )
+        self.run_menu([
+            ["yesno", "", 0], ["textbox", "", 0], ["menu", "__exit", 0],
+        ])
+        env = tui.config.read_env(self.server / "server.env")
+        self.assertEqual(env["OVERRIDE_SERVER_PROPERTIES"], "false")
+        self.assertEqual(env["RCON_PASSWORD"], "legacy-secret")
+        self.assertNotIn("MOTD", env)
+        self.assertEqual(tui.config.parse_import_properties(self.properties)["motd"], "Original")
+        self.assertTrue(list((self.server / "backups/source-migrations").glob("*/compose.yaml")))
+
+    def test_invalid_legacy_properties_abort_before_backup(self):
+        self.properties.write_text("motd=Invalid\\u12G4\n")
+        before = (self.server / "compose.yaml").read_bytes()
+        self.run_menu([["yesno", "", 0], ["textbox", "", 0]], expected_status=1)
+        self.assertEqual((self.server / "compose.yaml").read_bytes(), before)
+        self.assertFalse((self.server / "server.env").exists())
+        self.assertFalse((self.server / "backups/source-migrations").exists())
+
+    def test_running_server_cannot_migrate_from_settings_menu(self):
+        (self.server / "server.env").write_text('MOTD="Legacy"\n')
+        self.run_menu([["yesno", "", 0], ["textbox", "", 0]], running="yes", expected_status=1)
+        self.assertNotIn("OVERRIDE_SERVER_PROPERTIES", tui.config.read_env(self.server / "server.env"))
         self.assertFalse((self.server / "backups/source-migrations").exists())
 
     def test_empty_backups_and_cancel_restore_do_not_change_properties(self):

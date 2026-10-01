@@ -158,23 +158,24 @@ choose_properties_file() {
 }
 
 import_properties() {
-  local directory="$1" source="${2-}" backup mode
+  local directory="$1" source="${2-}" backup mode migration_backup
   require_stopped "$directory"
   if [[ -z "$source" ]]; then
     source="$(choose_properties_file)" || return 0
   fi
   [[ -f "$source" ]] || die "$(tr server.import_source_missing "$source")"
   python3 "$CONFIG_TOOL" validate-properties "$source" || die "$(tr server.import_failed)"
-  python3 "$CONFIG_TOOL" migrate "$directory" || die "$(tr server.import_failed)"
+  mode="$(python3 "$CONFIG_TOOL" source-mode "$directory")" ||
+    die "$(tr properties.source_check_failed)"
+  if [[ "$mode" != properties ]]; then
+    migration_backup="$(python3 "$CONFIG_TOOL" migrate-to-properties "$directory")" ||
+      die "$(tr properties.migration_failed)"
+    printf '%s\n' "$(tr properties.migration_done "$migration_backup")"
+  fi
   backup="$(python3 "$CONFIG_TOOL" import-properties "$directory" "$source")" || die "$(tr server.import_failed)"
   compose_in "$directory" config --quiet || die "$(tr properties.compose_invalid)"
   [[ -z "$backup" ]] || printf '%s\n' "$(tr server.import_backup "$backup")"
-  mode="$(python3 "$CONFIG_TOOL" source-mode "$directory")"
-  if [[ "$mode" == properties ]]; then
-    printf '%s\n' "$(tr server.import_done_properties "${directory}/data/server.properties")"
-  else
-    printf '%s\n' "$(tr server.import_done "${directory}/server.env")"
-  fi
+  printf '%s\n' "$(tr server.import_done_properties "${directory}/data/server.properties")"
 }
 
 open_folder() {
@@ -208,12 +209,18 @@ require_properties_source() {
 }
 
 manage_properties() {
-  local id="$1" directory="$2" command="${3-}" properties backup
+  local id="$1" directory="$2" command="${3-}" properties backup mode
   properties="${directory}/data/server.properties"
   case "$command" in
     '') exec "${SCRIPT_DIR}/server-properties-tui.sh" "$id" "$directory" ;;
     migrate)
       [[ $# -eq 3 ]] || die "$(tr properties.cli_usage)"
+      mode="$(python3 "$CONFIG_TOOL" source-mode "$directory")" ||
+        die "$(tr properties.source_check_failed)"
+      if [[ "$mode" == properties ]]; then
+        printf '%s\n' "$(tr properties.already_managed)"
+        return 0
+      fi
       require_stopped "$directory"
       backup="$(python3 "$CONFIG_TOOL" migrate-to-properties "$directory")" ||
         die "$(tr properties.migration_failed)"

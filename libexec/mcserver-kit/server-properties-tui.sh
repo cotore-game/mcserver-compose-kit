@@ -267,14 +267,6 @@ edit_all_properties() {
   fi
 }
 
-migrate_properties_source() {
-  [[ "$manual_properties" != true ]] || return 0
-  whiptail --title "$SERVER_ID" --yesno "$(tr properties.tui_migrate_confirm)" 13 82 || return 0
-  run_checked "${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" properties migrate
-  manual_properties=true
-  changed=true
-}
-
 backup_properties() {
   [[ "$manual_properties" == true ]] || return 0
   run_checked "${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" properties backup
@@ -307,24 +299,28 @@ main() {
   command -v whiptail >/dev/null 2>&1 || die "$(tr properties.whiptail_missing)"
   [[ -f "${SERVER_DIR}/compose.yaml" ]] || die "$(tr server.compose_missing "$SERVER_ID")"
 
-  if [[ ! -f "$SERVER_ENV" ]]; then
-    whiptail --yesno "$(tr properties.migration_prompt)" 11 76 || return 0
-    run_checked python3 "$CONFIG_TOOL" migrate "$SERVER_DIR"
+  source_mode="$(python3 "$CONFIG_TOOL" source-mode "$SERVER_DIR")" || die "$(tr properties.source_check_failed)"
+  if [[ "$source_mode" != properties ]]; then
+    whiptail --title "$SERVER_ID" --yesno "$(tr properties.migration_prompt)" 13 82 || return 0
+    run_checked "${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" properties migrate
+  fi
+  [[ "$(python3 "$CONFIG_TOOL" source-mode "$SERVER_DIR")" == properties ]] ||
+    die "$(tr properties.source_check_failed)"
+  [[ -f "$SERVER_PROPERTIES" ]] || die "$(tr properties.file_missing)"
+  local running status output
+  output="$(mktemp)"
+  if (cd "$SERVER_DIR" && docker compose ps --status running --services) >"$output" 2>&1; then
+    running="$(<"$output")"
+    rm -f -- "$output"
   else
-    source_mode="$(python3 "$CONFIG_TOOL" source-mode "$SERVER_DIR")" || die "$(tr properties.source_check_failed)"
-    if [[ "$source_mode" == environment ]]; then
-      run_checked python3 "$CONFIG_TOOL" migrate "$SERVER_DIR"
-    fi
+    status=$?
+    [[ -s "$output" ]] || printf '%s\n' "$(tr server.status_failed)" >"$output"
+    whiptail --title "$(tr common.error)" --textbox "$output" 22 84 || true
+    rm -f -- "$output"
+    return "$status"
   fi
-  if [[ "$(python3 "$CONFIG_TOOL" get "$SERVER_ENV" OVERRIDE_SERVER_PROPERTIES true)" == false ]]; then
-    [[ -f "$SERVER_PROPERTIES" ]] || die "$(tr properties.file_missing)"
-    local running
-    running="$(cd "$SERVER_DIR" && docker compose ps --status running --services)" || die "$(tr server.status_failed)"
-    if [[ -n "$running" ]]; then
-      die "$(tr properties.stop_first "$SERVER_ID")"
-    fi
-    manual_properties=true
-  fi
+  [[ -z "$running" ]] || die "$(tr properties.stop_first "$SERVER_ID")"
+  manual_properties=true
   cd -- "$SERVER_DIR"
   run_checked docker compose config --quiet
 
@@ -348,22 +344,15 @@ main() {
       __more "$(tr properties.more_settings)"
       __resource "$(tr properties.resource_pack_settings)"
       __import "$(tr properties.import)"
+      __all "$(tr properties.editor.title)"
+      __backup "$(tr properties.tui_backup)"
+      __restore "$(tr properties.tui_restore)"
+      __exit "$(tr properties.exit)"
     )
-    if [[ "$manual_properties" == true ]]; then
-      items+=(
-        __all "$(tr properties.editor.title)"
-        __backup "$(tr properties.tui_backup)"
-        __restore "$(tr properties.tui_restore)"
-      )
-    else
-      items+=(__migrate "$(tr properties.tui_migrate)")
-    fi
-    items+=(__exit "$(tr properties.exit)")
     selected="$(whiptail --title "${SERVER_ID}" --menu "$(tr properties.choose)" 25 94 18 "${items[@]}" 3>&1 1>&2 2>&3)" || break
     case "$selected" in
       __exit) break ;;
       __all) edit_all_properties ;;
-      __migrate) migrate_properties_source ;;
       __backup) backup_properties ;;
       __restore) restore_properties ;;
       __import) import_properties || true ;;

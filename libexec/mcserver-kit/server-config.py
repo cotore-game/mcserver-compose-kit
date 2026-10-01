@@ -151,17 +151,6 @@ def write_env(path: Path, values: dict[str, str]) -> None:
     atomic_write(path, contents, 0o600)
 
 
-def read_properties(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    if not path.is_file():
-        return values
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line or line.startswith(("#", "!")) or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        values[key.strip()] = value
-    return values
-
 
 def validate_property_key(key: str) -> None:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", key):
@@ -382,57 +371,26 @@ def parse_import_properties(source: Path) -> dict[str, str]:
 
 def import_properties(server_dir: Path, source: Path) -> Path | None:
     validate_properties_source(source)
-    imported = parse_import_properties(source)
     env_path = server_dir / "server.env"
     values = read_env(env_path)
+    if values.get("OVERRIDE_SERVER_PROPERTIES", "true").lower() != "false":
+        raise ValueError("Migrate to data/server.properties before importing")
     destination = server_dir / "data" / "server.properties"
     destination.parent.mkdir(parents=True, exist_ok=True)
     if source.resolve() == destination.resolve():
         raise ValueError("The source is already this server's server.properties")
 
-    if values.get("OVERRIDE_SERVER_PROPERTIES", "true").lower() == "false":
-        backup = create_properties_backup(server_dir, "before-import") if destination.exists() else None
-        descriptor, temporary_name = tempfile.mkstemp(prefix="server.properties.", dir=destination.parent)
-        try:
-            with os.fdopen(descriptor, "wb") as output, source.open("rb") as input_file:
-                shutil.copyfileobj(input_file, output)
-            # The managed world is always mounted at data/world.
-            set_property_key(Path(temporary_name), "level-name", "world")
-            set_property_key(Path(temporary_name), "server-port", "25565")
-            os.chmod(temporary_name, 0o644)
-            os.replace(temporary_name, destination)
-            sync_rcon_environment(destination)
-        finally:
-            if os.path.exists(temporary_name):
-                os.unlink(temporary_name)
-        return backup
-
-    for env_key, property_key in PROPERTY_KEYS.items():
-        if property_key in imported:
-            values[env_key] = imported[property_key]
-    # create-server.sh stores the selected save at data/world; Compose sets LEVEL=world.
-    known = set(PROPERTY_KEYS.values()) | {"level-name", "server-port"}
-    extras = [f"{key}={value}" for key, value in imported.items() if key not in known]
-    values["CUSTOM_SERVER_PROPERTIES"] = "\n".join(extras)
-    values["OVERRIDE_SERVER_PROPERTIES"] = "true"
-
-    backup = None
-    if destination.exists():
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        backup = destination.with_name(f"server.properties.mcserver-kit.{stamp}.bak")
-        suffix = 1
-        while backup.exists():
-            backup = destination.with_name(f"server.properties.mcserver-kit.{stamp}.{suffix}.bak")
-            suffix += 1
-        shutil.copy2(destination, backup)
-
+    backup = create_properties_backup(server_dir, "before-import") if destination.exists() else None
     descriptor, temporary_name = tempfile.mkstemp(prefix="server.properties.", dir=destination.parent)
     try:
         with os.fdopen(descriptor, "wb") as output, source.open("rb") as input_file:
             shutil.copyfileobj(input_file, output)
+        # The managed world is always mounted at data/world.
+        set_property_key(Path(temporary_name), "level-name", "world")
+        set_property_key(Path(temporary_name), "server-port", "25565")
         os.chmod(temporary_name, 0o644)
-        write_env(env_path, values)
         os.replace(temporary_name, destination)
+        sync_rcon_environment(destination)
     finally:
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
@@ -510,11 +468,15 @@ def migrate_compose(path: Path) -> None:
 
 
 def migrate_compose_to_properties(path: Path) -> None:
+    migrate_compose(path)  # Ensure old Compose files load retained non-property settings.
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
     property_variables = set(PROPERTY_KEYS) | {
         "CUSTOM_SERVER_PROPERTIES",
         "OVERRIDE_SERVER_PROPERTIES",
         "LEVEL",
+        "ENABLE_RCON",
+        "RCON_PORT",
+        "RCON_PASSWORD",
     }
     output: list[str] = []
     in_minecraft = False
@@ -548,11 +510,6 @@ def migrate_to_properties(server_dir: Path) -> Path:
     if not compose.is_file():
         raise ValueError("compose.yaml does not exist")
 
-    backup = migration_backup_directory(server_dir)
-    for source in (compose, env_path, properties_path):
-        if source.is_file():
-            shutil.copy2(source, backup / source.name)
-
     dotenv = read_env(server_dir / ".env")
     compose_values = compose_environment(compose, dotenv)
     env_values = read_env(env_path)
@@ -571,14 +528,22 @@ def migrate_to_properties(server_dir: Path) -> Path:
         validate_property_key(key.strip())
         custom_values.append((key.strip(), value))
 
+    backup = migration_backup_directory(server_dir)
+    for source in (compose, env_path, properties_path):
+        if source.is_file():
+            shutil.copy2(source, backup / source.name)
+
     retained = {
         key: value
         for key, value in env_values.items()
-        if key not in PROPERTY_KEYS and key != "CUSTOM_SERVER_PROPERTIES"
+        if key not in PROPERTY_KEYS and key not in ("CUSTOM_SERVER_PROPERTIES", "LEVEL")
     }
     for key in ("WHITELIST", "EXISTING_WHITELIST_FILE", "OPS", "EXISTING_OPS_FILE"):
         if key in compose_values and key not in retained:
             retained[key] = compose_values[key]
+    for key, old_key in (("WHITELIST", "MC_WHITELIST"), ("OPS", "MC_OPS")):
+        if key not in retained and old_key in dotenv:
+            retained[key] = dotenv[old_key]
     retained["OVERRIDE_SERVER_PROPERTIES"] = "false"
 
     properties_path.parent.mkdir(parents=True, exist_ok=True)
@@ -595,14 +560,25 @@ def migrate_to_properties(server_dir: Path) -> Path:
             set_property_key(temporary, key, value)
         for env_key, property_key in PROPERTY_KEYS.items():
             value = env_values.get(env_key, compose_values.get(env_key))
+            if env_key == "ENABLE_WHITELIST" and value is None and retained.get("WHITELIST"):
+                value = "true"
             if env_key == "MOTD":
                 value = env_values.get(env_key, dotenv.get("MC_MOTD", value))
+            if value is not None:
+                set_property_key(temporary, property_key, value)
+        for env_key, property_key in (
+            ("ENABLE_RCON", "enable-rcon"),
+            ("RCON_PORT", "rcon.port"),
+            ("RCON_PASSWORD", "rcon.password"),
+        ):
+            value = env_values.get(env_key, compose_values.get(env_key))
             if value is not None:
                 set_property_key(temporary, property_key, value)
         # mcserver-kit stores imported worlds at data/world.
         set_property_key(temporary, "level-name", "world")
         set_property_key(temporary, "server-port", "25565")
         temporary.chmod(0o644)
+        retained.update(rcon_environment(parse_import_properties(temporary)))
 
         try:
             write_env(env_path, retained)
@@ -622,36 +598,6 @@ def migrate_to_properties(server_dir: Path) -> Path:
     return backup
 
 
-def migrate(server_dir: Path) -> None:
-    compose = server_dir / "compose.yaml"
-    target = server_dir / "server.env"
-    dotenv = read_env(server_dir / ".env")
-    existing = read_env(target)
-    # Legacy UI/import entry points must not recreate property overrides.
-    if existing.get("OVERRIDE_SERVER_PROPERTIES", "true").lower() == "false":
-        return
-    compose_values = compose_environment(compose, dotenv)
-    properties = read_properties(server_dir / "data" / "server.properties")
-    backup = server_dir / "compose.yaml.mcserver-kit.bak"
-    if not target.exists() and not backup.exists():
-        shutil.copy2(compose, backup)
-    values: dict[str, str] = dict(existing)
-    for env_key, default in MANAGED_DEFAULTS.items():
-        property_key = PROPERTY_KEYS.get(env_key, "")
-        values[env_key] = existing.get(
-            env_key,
-            compose_values.get(env_key, properties.get(property_key, default)),
-        )
-    values["MOTD"] = existing.get("MOTD", dotenv.get("MC_MOTD", values["MOTD"]))
-    values["WHITELIST"] = existing.get("WHITELIST", dotenv.get("MC_WHITELIST", values["WHITELIST"]))
-    values["OPS"] = existing.get("OPS", dotenv.get("MC_OPS", values["OPS"]))
-    if "ENABLE_WHITELIST" not in existing and "ENABLE_WHITELIST" not in compose_values:
-        if values["WHITELIST"] or "WHITELIST" in compose_values:
-            values["ENABLE_WHITELIST"] = "true"
-    write_env(target, values)
-    migrate_compose(compose)
-
-
 def main() -> int:
     if len(sys.argv) < 3:
         print("usage: server-config.py OPERATION TARGET [ARG...]", file=sys.stderr)
@@ -664,9 +610,6 @@ def main() -> int:
         except (OSError, ValueError, UnicodeError) as error:
             print(f"Could not initialize server properties: {error}", file=sys.stderr)
             return 1
-        return 0
-    if operation == "migrate" and len(sys.argv) == 3:
-        migrate(target)
         return 0
     if operation == "migrate-to-properties" and len(sys.argv) == 3:
         try:

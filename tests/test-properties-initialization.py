@@ -1,4 +1,4 @@
-"""Creation settings remain authoritative across legacy import/UI entry points."""
+"""Creation settings remain authoritative across property import/UI entry points."""
 
 import importlib.util
 import json
@@ -67,17 +67,10 @@ class InitializationTests(unittest.TestCase):
         self.assertFalse(self.properties.exists())
         self.assertFalse(self.environment.exists())
 
-    def test_legacy_migration_does_not_regenerate_overrides(self):
-        self.initialize()
-        previous = self.environment.read_bytes()
-        config.migrate(self.server)
-        self.assertEqual(previous, self.environment.read_bytes())
-
     def test_import_preserves_source_and_membership(self):
         self.initialize()
         source = Path(self.workspace.name) / "server.properties"
         source.write_text("motd=Imported\nlevel-name=DistributedWorld\nmod.setting=yes\n", encoding="utf-8")
-        config.migrate(self.server)
         backup = config.import_properties(self.server, source)
         self.assertTrue(backup.is_file())
         env = config.read_env(self.environment)
