@@ -217,7 +217,7 @@ class DialogTests(unittest.TestCase):
 
 
 class TerminalTests(unittest.TestCase):
-    def run_terminal(self, body, interact, expected_status=0):
+    def run_terminal(self, body, interact, expected_status=0, expected_clears=1):
         with tempfile.TemporaryDirectory() as temp:
             workspace = Path(temp)
             script = workspace / "controller.sh"
@@ -259,7 +259,8 @@ class TerminalTests(unittest.TestCase):
                 self.assertEqual(process.returncode, expected_status, output.decode(errors="replace"))
                 self.assertEqual(output.count(b"\x1b[?1049h"), 1, "enter alternate screen once")
                 self.assertEqual(output.count(b"\x1b[?1049l"), 1, "leave only at final exit")
-                self.assertEqual(output.count(b"\x1b[2J"), 1, "do not clear the whole screen between dialogs")
+                self.assertEqual(output.count(b"\x1b[2J"), expected_clears,
+                                 "redraw fully only after handing the terminal to external output")
             finally:
                 if process.poll() is None:
                     process.kill()
@@ -308,7 +309,30 @@ whiptail --title RETURNED --msgbox Finished 10 70
             receive(b"RETURNED")
             self.assertEqual((workspace / "raw").read_text(), "hello")
             os.write(master, b"\r")
-        self.run_terminal(body, interact)
+        self.run_terminal(body, interact, expected_clears=2)
+
+    def test_external_clear_before_resume_rebuilds_frame(self):
+        body = """
+whiptail --title BEFORE --msgbox Ready 10 70
+tui_terminal_suspend
+clear
+printf 'LOG_SCREEN_READY\\n'
+read -r _
+clear
+tui_terminal_resume
+whiptail --title AFTER --msgbox Restored 10 70
+"""
+        def interact(master, workspace, output, receive):
+            receive(b"BEFORE")
+            os.write(master, b"\r")
+            receive(b"LOG_SCREEN_READY")
+            os.write(master, b"\r")
+            receive(b"AFTER")
+            self.assertNotIn(b"\x1b[?1049l", output)
+            os.write(master, b"\r")
+        # Initial curses screen, two external clear calls, and one curses
+        # invalidation when ownership returns to the TUI.
+        self.run_terminal(body, interact, expected_clears=4)
 
     def test_slow_home_list_and_server_return(self):
         body = """

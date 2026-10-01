@@ -187,7 +187,9 @@ class Session:
                 curses.noecho()
                 curses.cbreak()
                 curses.curs_set(0)
-                self.screen.touchwin()
+                # External commands (notably logs and clear) changed the
+                # physical screen behind curses. Rebuild it on the next draw.
+                self.screen.clearok(True)
                 self.reply()
                 return
             self.dialog = parse_dialog(args)
