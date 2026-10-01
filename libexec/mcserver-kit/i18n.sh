@@ -69,7 +69,6 @@ load_messages() {
   local catalog="${I18N_LOCALE_DIR}/${language}.json"
   local english_catalog="${I18N_LOCALE_DIR}/en.json"
   local key
-  local encoded
 
   [[ -f "$catalog" ]] || catalog="$english_catalog"
   load_catalog "$english_catalog"
