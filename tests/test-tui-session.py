@@ -72,6 +72,36 @@ class DialogTests(unittest.TestCase):
         session.key("\n")
         session.reply.assert_not_called()
 
+    def test_idle_menu_is_not_redrawn_but_loading_animates(self):
+        class Process:
+            returncode = 0
+
+            def __init__(self):
+                self.polls = 0
+
+            def poll(self):
+                self.polls += 1
+                return None if self.polls <= 4 else 0
+
+        for dialog, expected_draws in (({"kind": "menu"}, 1), (None, 4)):
+            session = object.__new__(ui.Session)
+            session.connection = None
+            session.listener = object()
+            session.suspended = False
+            session.process = Process()
+            session.dialog = dialog
+            session.frame = 0
+            session.draw = Mock()
+            session.reply = Mock()
+            session.key = Mock()
+            session.screen = Mock()
+            session.screen.getmaxyx.return_value = (24, 80)
+            session.screen.get_wch.side_effect = curses.error
+            with patch.object(ui.select, "select", return_value=([], [], [])):
+                self.assertEqual(session.run(), 0)
+            self.assertEqual(session.draw.call_count, expected_draws)
+            self.assertEqual(session.screen.timeout.call_count, 4)
+
     def test_initial_loading_uses_selected_language(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "language"

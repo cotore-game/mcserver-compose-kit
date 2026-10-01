@@ -338,16 +338,29 @@ class Session:
             self.scroll = max(0, min(total - 1, self.scroll + (delta if key in (curses.KEY_DOWN, curses.KEY_NPAGE) else -delta)))
 
     def run(self):
+        needs_draw = True
+        previous_size = self.screen.getmaxyx()
         while self.process.poll() is None:
             if self.connection is None and select.select([self.listener], [], [], 0)[0]:
                 self.accept()
+                needs_draw = True
             if self.suspended:
                 time.sleep(0.05)
                 continue
-            self.frame += 1
-            self.draw()
+            current_size = self.screen.getmaxyx()
+            if current_size != previous_size:
+                previous_size = current_size
+                needs_draw = True
+            if self.dialog is None:
+                self.frame += 1
+                needs_draw = True  # Animate only while work is in progress.
+            if needs_draw:
+                self.draw()
+                needs_draw = False
+            self.screen.timeout(100 if self.dialog is None else 250)
             try:
                 self.key(self.screen.get_wch())
+                needs_draw = True
             except curses.error:
                 pass
         self.reply(1)
