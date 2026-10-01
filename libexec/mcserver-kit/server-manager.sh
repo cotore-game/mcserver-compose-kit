@@ -72,11 +72,18 @@ resolve_deletion_target() {
 }
 
 list_servers() {
-  local root
-  local directory
+  local root directory id state
   local found=false
+  local raw=false
+  case "${1-}" in
+    '') ;;
+    --raw) raw=true ;;
+    *) die "$(tr server.manager_usage)" ;;
+  esac
   root="$(server_root)"
-  printf '%-28s %s\n' "$(tr server.list_id)" "$(tr server.list_status)"
+  if [[ "$raw" != true ]]; then
+    printf '%-28s %s\n' "$(tr server.list_id)" "$(tr server.list_status)"
+  fi
   if [[ ! -d "$root" ]]; then
     return
   fi
@@ -84,11 +91,18 @@ list_servers() {
   for directory in "$root"/*; do
     [[ -d "$directory" && -f "${directory}/compose.yaml" ]] || continue
     found=true
-    printf '%-28s ' "$(basename "$directory")"
-    server_state "$directory"
+    id="$(basename "$directory")"
+    state="$(container_state "$directory")"
+    if [[ "$raw" == true ]]; then
+      printf '%s\t%s\n' "$id" "$state"
+    else
+      printf '%-28s %s\n' "$id" "$(tr "server.state_${state}")"
+    fi
   done
   shopt -u nullglob
-  [[ "$found" == true ]] || printf '%s\n' "$(tr server.none)"
+  if [[ "$found" != true && "$raw" != true ]]; then
+    printf '%s\n' "$(tr server.none)"
+  fi
 }
 
 compose_in() {
@@ -389,7 +403,9 @@ manage_server() {
 
 main() {
   case "${1-}" in
-    list) list_servers ;;
+    list)
+      shift
+      list_servers "$@" ;;
     server)
       shift
       manage_server "$@"

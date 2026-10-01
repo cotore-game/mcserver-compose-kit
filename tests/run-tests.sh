@@ -108,6 +108,40 @@ JSON
     'locale messages preserve their final newline'
 }
 
+test_server_raw_listing() {
+  local temp_dir="$1"
+  local root="${temp_dir}/raw-list/servers"
+  local fake_bin="${temp_dir}/raw-list/bin"
+  local config_file="${temp_dir}/raw-list/config.yml"
+  local output
+  mkdir -p "${root}/alpha" "${root}/beta" "$fake_bin"
+  : >"${root}/alpha/compose.yaml"
+  : >"${root}/beta/compose.yaml"
+  cat >"$config_file" <<CONFIG
+paths:
+  server_root: "$root"
+CONFIG
+  cat >"${fake_bin}/docker" <<'DOCKER'
+#!/usr/bin/env bash
+if [[ "$*" != 'compose ps -a --format json' ]]; then exit 2; fi
+case "$PWD" in
+  */alpha) printf '{"Service":"minecraft","State":"running"}\n' ;;
+  */beta) printf '[]\n' ;;
+esac
+DOCKER
+  chmod +x "${fake_bin}/docker"
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=ja MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" list --raw)"
+  assert_equal $'alpha\trunning\nbeta\tabsent' "$output" 'raw listing reports each server once in a stable machine-readable format'
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" list)"
+  assert_equal 'present' "$(grep -q 'alpha' <<<"$output" && grep -q 'beta' <<<"$output" && printf present)" \
+    'human-readable listing remains available'
+  assert_fails 'raw listing rejects unknown options' \
+    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+      bash "${REPO_ROOT}/mcserver-kit" list --unknown
+}
+
 test_installer_version_selection() {
   local installer_output
 
@@ -1236,6 +1270,7 @@ main() {
   test_version_resolution
   test_locales
   test_locale_fallback
+  test_server_raw_listing "$TEST_TEMP_DIR"
   test_installer_version_selection
   test_update_check "$TEST_TEMP_DIR"
   test_setup_gate "$TEST_TEMP_DIR"

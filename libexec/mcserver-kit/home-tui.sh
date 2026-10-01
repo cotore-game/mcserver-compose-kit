@@ -72,19 +72,14 @@ LOGO
 }
 
 dashboard_text() {
-  local root="$1" latest=''
-  local total=0 running=0 directory
-  if [[ -d "$root" ]]; then
-    shopt -s nullglob
-    for directory in "$root"/*; do
-      [[ -d "$directory" && -f "${directory}/compose.yaml" ]] || continue
-      total=$((total + 1))
-      if [[ "$("${SCRIPT_DIR}/server-manager.sh" server "$(basename "$directory")" state --raw)" == running ]]; then
-        running=$((running + 1))
-      fi
-    done
-    shopt -u nullglob
-  fi
+  local latest='' listing id state
+  local total=0 running=0
+  listing="$("${SCRIPT_DIR}/server-manager.sh" list --raw 2>/dev/null || true)"
+  while IFS=$'\t' read -r id state; do
+    [[ -n "$id" ]] || continue
+    total=$((total + 1))
+    [[ "$state" != running ]] || running=$((running + 1))
+  done <<< "$listing"
   logo
   latest="$("${SCRIPT_DIR}/update.sh" --cached-quiet 2>/dev/null || true)"
   printf '\n%s\n%s\n' "$(tr home.version "$VERSION")" "$(tr home.summary "$total" "$running")"
@@ -201,20 +196,16 @@ server_action_menu() {
 }
 
 servers_menu() {
-  local root directory id selected
+  local root id state selected listing
   local items=()
   root="$(server_root)"
   while true; do
     items=()
-    if [[ -d "$root" ]]; then
-      shopt -s nullglob
-      for directory in "$root"/*; do
-        [[ -d "$directory" && -f "${directory}/compose.yaml" ]] || continue
-        id="$(basename "$directory")"
-        items+=("$id" "$(server_status "$directory")")
-      done
-      shopt -u nullglob
-    fi
+    listing="$("${SCRIPT_DIR}/server-manager.sh" list --raw)" || return 0
+    while IFS=$'\t' read -r id state; do
+      [[ -n "$id" ]] || continue
+      items+=("$id" "$(tr "server.state_${state}")")
+    done <<< "$listing"
     items+=(__back "$(tr tui.back)")
     selected="$(whiptail --title "$(tr home.servers)" --menu "$(tr home.select_server)" 23 82 15 "${items[@]}" 3>&1 1>&2 2>&3)" || return 0
     [[ "$selected" == __back ]] && return
@@ -255,7 +246,7 @@ diagnostics() {
 }
 
 main() {
-  local root choice installed_version latest
+  local choice installed_version latest
   command -v whiptail >/dev/null 2>&1 || {
     tr tui.missing >&2
     exit 1
@@ -264,9 +255,8 @@ main() {
     printf '%s\n' "$(tr home.tty_required)" >&2
     exit 2
   }
-  root="$(server_root)"
   while true; do
-    choice="$(whiptail --backtitle "mcserver-kit ${VERSION}" --title 'Minecraft Server Kit' --menu "$(dashboard_text "$root")" 28 94 10 \
+    choice="$(whiptail --backtitle "mcserver-kit ${VERSION}" --title 'Minecraft Server Kit' --menu "$(dashboard_text)" 28 94 10 \
       servers "$(tr home.servers)" \
       create "$(tr home.create)" \
       config "$(tr home.config)" \
