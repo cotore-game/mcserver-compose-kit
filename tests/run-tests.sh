@@ -852,6 +852,8 @@ difficulty=easy
 pvp=true
 level-name=world
 server-port=25565
+enable-rcon=true
+rcon.password=test-only-secret
 PROPERTIES
   cat >"${fake_bin}/docker" <<'DOCKER'
 #!/usr/bin/env bash
@@ -868,7 +870,16 @@ DOCKER
   assert_equal 'properties' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" source-mode "$server_dir")" 'migration marks server.properties as authoritative'
   assert_equal 'Environment MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" motd)" 'migration applies the effective environment MOTD'
   assert_equal 'hard' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" difficulty)" 'migration applies managed environment properties'
-  assert_equal 'false' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" pvp)" 'migration applies direct Compose property overrides'
+  assert_equal 'absent' "$(! grep -q '^pvp=' "$properties" && printf absent)" 'migration removes the obsolete pvp property'
+  assert_equal 'present' "$(grep -q 'gamerule minecraft:pvp false' "${server_dir}/server.env" && printf present)" 'migration routes PVP through the Minecraft 26.3 game rule'
+  assert_equal 'false' "$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" bash "${REPO_ROOT}/mcserver-kit" server alpha properties get pvp)" 'the CLI reads the game rule value'
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties set pvp true >/dev/null
+  assert_equal 'true' "$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties get pvp)" 'the CLI updates the game rule value'
+  assert_equal 'absent' "$(! grep -q '^pvp=' "$properties" && printf absent)" 'editing PVP does not recreate the obsolete property'
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties set pvp false >/dev/null
   assert_equal 'enabled' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" plugin.option)" 'migration preserves custom properties'
   assert_equal 'present' "$(grep -q '^# Keep this operator comment$' "$properties" && printf present)" 'migration preserves existing comments'
   assert_equal 'absent' "$(! grep -q '^MOTD=' "${server_dir}/server.env" && printf absent)" 'migration removes duplicated property variables from server.env'
@@ -1348,6 +1359,7 @@ main() {
   trap cleanup EXIT
 
   python3 "${REPO_ROOT}/tests/test-properties-initialization.py"
+  python3 "${REPO_ROOT}/tests/test-versioned-settings.py"
   python3 "${REPO_ROOT}/tests/test-properties-tui.py"
 
   test_version_resolution

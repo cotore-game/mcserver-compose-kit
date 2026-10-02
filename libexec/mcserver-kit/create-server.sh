@@ -507,6 +507,13 @@ while true; do
     printf '入力エラー: 26.2、1.21.2、LATESTのように指定してください。\n' >&2
     continue
   fi
+  if [[ "$version" == LATEST ]]; then
+    if ! version="$(python3 "${SCRIPT_DIR}/versioned_settings.py" latest -)"; then
+      printf 'LATESTの解決に失敗しました。接続を確認するか、具体的なバージョンを指定してください。\n' >&2
+      continue
+    fi
+    printf 'LATESTを現在のリリース %s に固定します。\n' "$version"
+  fi
   if minecraft_image="$(resolve_minecraft_image "$version" "$java_image_tag")"; then
     break
   fi

@@ -1,5 +1,6 @@
 {
   "properties.editor.title": "All server.properties keys",
+  "properties.version_unsupported": "This setting (%s) is not supported in Minecraft %s. Choose a supported version or configure a suitable mod/plugin; no equivalent vanilla setting is available.",
   "properties.editor.unknown": "No description available; consult your server or mod documentation.",
   "properties.editor.hint": "Current values appear before descriptions. Select a key for details, editing or removal.",
   "properties.editor.edit": "Edit value",
@@ -20,8 +21,8 @@
   "properties.description.white-list": "Restrict access to players on the whitelist.",
   "properties.description.enforce-whitelist": "Disconnect players who are no longer whitelisted.",
   "properties.description.allow-flight": "Allow flying without the server's flight kick.",
-  "properties.description.enable-command-block": "Legacy key; use the enableCommandBlocks game rule in Minecraft 26.3.",
-  "properties.description.pvp": "Legacy key; use the pvp game rule in Minecraft 26.3.",
+  "properties.description.enable-command-block": "Legacy key; since 1.21.9 use a game rule (minecraft:command_blocks_work in 1.21.11+).",
+  "properties.description.pvp": "Legacy key; since 1.21.9 use a game rule (minecraft:pvp in 1.21.11+).",
   "properties.description.view-distance": "Maximum chunk distance sent to players.",
   "properties.description.simulation-distance": "Chunk distance within which world simulation runs.",
   "properties.description.spawn-protection": "Protected area around spawn; 0 disables protection.",
