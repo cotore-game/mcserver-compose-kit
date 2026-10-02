@@ -208,9 +208,26 @@ require_properties_source() {
   [[ "$mode" == properties ]] || die "$(tr properties.migrate_first)"
 }
 
+versioned_setting_key() {
+  case "$1" in
+    pvp) printf PVP ;;
+    enable-command-block) printf ENABLE_COMMAND_BLOCK ;;
+    allow-nether) printf ALLOW_NETHER ;;
+    spawn-monsters) printf SPAWN_MONSTERS ;;
+    spawn-animals) printf SPAWN_ANIMALS ;;
+    spawn-npcs) printf SPAWN_NPCS ;;
+  esac
+}
+
 manage_properties() {
-  local id="$1" directory="$2" command="${3-}" properties backup mode
+  local id="$1" directory="$2" command="${3-}" properties backup mode versioned_key versioned_mode
   properties="${directory}/data/server.properties"
+  versioned_key="$(versioned_setting_key "${4-}")"
+  versioned_mode='ordinary'
+  if [[ -n "$versioned_key" ]]; then
+    versioned_mode="$(python3 "${SCRIPT_DIR}/versioned_settings.py" classify "$directory" "$versioned_key")" ||
+      die "$(tr properties.source_check_failed)"
+  fi
   case "$command" in
     '') exec "${SCRIPT_DIR}/server-properties-tui.sh" "$id" "$directory" ;;
     migrate)
@@ -235,26 +252,51 @@ manage_properties() {
     get)
       [[ $# -eq 4 ]] || die "$(tr properties.cli_usage)"
       require_properties_source "$directory"
-      python3 "$CONFIG_TOOL" property-key-get "$properties" "$4"
+      if [[ "$versioned_mode" == camel || "$versioned_mode" == namespaced ]]; then
+        python3 "${SCRIPT_DIR}/versioned_settings.py" get "$directory" "$versioned_key"
+      elif [[ "$versioned_mode" == removed || "$versioned_mode" == unknown ]]; then
+        die "$(tr properties.version_unsupported "$4" "$(python3 "$CONFIG_TOOL" get "${directory}/.env" MC_VERSION unknown)")"
+      else
+        python3 "$CONFIG_TOOL" property-key-get "$properties" "$4"
+      fi
       ;;
     set | add)
       [[ $# -eq 5 ]] || die "$(tr properties.cli_usage)"
       require_properties_source "$directory"
       require_stopped "$directory"
-      python3 "$CONFIG_TOOL" property-backup "$directory" >/dev/null
-      python3 "$CONFIG_TOOL" property-key-set "$properties" "$4" "$5"
+      if [[ "$versioned_mode" == camel || "$versioned_mode" == namespaced ]]; then
+        python3 "$CONFIG_TOOL" property-backup "$directory" >/dev/null
+        python3 "${SCRIPT_DIR}/versioned_settings.py" set "$directory" "$versioned_key" "$5" || return
+      elif [[ "$versioned_mode" == removed || "$versioned_mode" == unknown ]]; then
+        die "$(tr properties.version_unsupported "$4" "$(python3 "$CONFIG_TOOL" get "${directory}/.env" MC_VERSION unknown)")"
+      else
+        python3 "$CONFIG_TOOL" property-backup "$directory" >/dev/null
+        python3 "$CONFIG_TOOL" property-key-set "$properties" "$4" "$5"
+      fi
       printf '%s\n' "$(tr properties.cli_saved "$4")"
       ;;
     remove)
       [[ $# -eq 4 ]] || die "$(tr properties.cli_usage)"
       require_properties_source "$directory"
       require_stopped "$directory"
-      python3 "$CONFIG_TOOL" property-backup "$directory" >/dev/null
-      if python3 "$CONFIG_TOOL" property-key-remove "$properties" "$4"; then
-        printf '%s\n' "$(tr properties.cli_removed "$4")"
+      if [[ "$versioned_mode" == camel || "$versioned_mode" == namespaced ]]; then
+        python3 "$CONFIG_TOOL" property-backup "$directory" >/dev/null
+        if python3 "${SCRIPT_DIR}/versioned_settings.py" remove "$directory" "$versioned_key"; then
+          printf '%s\n' "$(tr properties.cli_removed "$4")"
+        else
+          [[ $? -eq 3 ]] && die "$(tr properties.cli_missing_key "$4")"
+          return 1
+        fi
+      elif [[ "$versioned_mode" == removed || "$versioned_mode" == unknown ]]; then
+        die "$(tr properties.version_unsupported "$4" "$(python3 "$CONFIG_TOOL" get "${directory}/.env" MC_VERSION unknown)")"
       else
-        [[ $? -eq 3 ]] && die "$(tr properties.cli_missing_key "$4")"
-        return 1
+        python3 "$CONFIG_TOOL" property-backup "$directory" >/dev/null
+        if python3 "$CONFIG_TOOL" property-key-remove "$properties" "$4"; then
+          printf '%s\n' "$(tr properties.cli_removed "$4")"
+        else
+          [[ $? -eq 3 ]] && die "$(tr properties.cli_missing_key "$4")"
+          return 1
+        fi
       fi
       ;;
     import)

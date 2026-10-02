@@ -13,6 +13,9 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import versioned_settings
+
 MANAGED_DEFAULTS = {
     "MOTD": "A Minecraft Server",
     "DIFFICULTY": "easy",
@@ -115,10 +118,11 @@ def initialize_properties(server_dir: Path, contents: str) -> None:
         "enable-rcon": "true", "rcon.port": "25575",
         "rcon.password": secrets.token_hex(24),
     })
+    retained = {key: value for key, value in values.items() if key not in PROPERTY_KEYS}
+    versioned_settings.prepare_initial(read_env(server_dir / ".env").get("MC_VERSION", ""), entries, retained)
     rendered = "#Minecraft server properties\n" + "".join(
         f"{key}={escape_property_value(value)}\n" for key, value in entries.items()
     )
-    retained = {key: value for key, value in values.items() if key not in PROPERTY_KEYS}
     retained["OVERRIDE_SERVER_PROPERTIES"] = "false"
     retained.update(rcon_environment(entries))
     properties.parent.mkdir(parents=True, exist_ok=True)
@@ -143,11 +147,14 @@ def sync_rcon_environment(properties_path: Path) -> None:
         write_env(environment, values)
 
 
-def replace_authoritative_properties(server_dir: Path, prepared: Path) -> None:
+def replace_authoritative_properties(
+    server_dir: Path, prepared: Path, environment_overrides: dict[str, str] | None = None
+) -> None:
     """Commit prepared properties and their derived RCON client settings together."""
     destination = server_dir / "data" / "server.properties"
     environment = server_dir / "server.env"
     values = read_env(environment)
+    values.update(environment_overrides or {})
     if values.get("OVERRIDE_SERVER_PROPERTIES", "true").lower() != "false":
         raise ValueError("Migrate to data/server.properties before replacing it")
     values.update(rcon_environment(parse_import_properties(prepared)))
@@ -271,6 +278,13 @@ def create_properties_backup(server_dir: Path, reason: str = "manual") -> Path:
     destination = destination_dir / f"{stamp}-{reason}.properties"
     shutil.copy2(source, destination)
     destination.chmod(0o600)
+    rules = versioned_settings.startup_values(
+        read_env(server_dir / "server.env").get("RCON_CMDS_STARTUP", "")
+    )
+    atomic_write(
+        destination.with_suffix(".properties.rules.json"),
+        json.dumps(rules, sort_keys=True) + "\n", 0o600
+    )
     return destination
 
 
@@ -293,14 +307,31 @@ def resolve_properties_backup(server_dir: Path, backup_id: str) -> Path:
 def restore_properties_backup(server_dir: Path, backup_id: str) -> Path:
     source = resolve_properties_backup(server_dir, backup_id)
     validate_properties_source(source, require_name=False)
-    previous = create_properties_backup(server_dir, "before-restore")
     destination = server_dir / "data" / "server.properties"
+    environment = read_env(server_dir / "server.env")
+    rules_path = source.with_suffix(".properties.rules.json")
+    if rules_path.is_symlink():
+        raise ValueError("Game rule backup must not be a symlink")
+    if rules_path.is_file():
+        saved_rules = json.loads(rules_path.read_text(encoding="utf-8"))
+        if not isinstance(saved_rules, dict) or any(
+            key not in versioned_settings.MOVED_RULES or value not in ("true", "false")
+            for key, value in saved_rules.items()
+        ):
+            raise ValueError("Invalid game rule backup")
+        version = read_env(server_dir / ".env").get("MC_VERSION", "")
+        environment["RCON_CMDS_STARTUP"] = versioned_settings.update_startup(
+            environment.get("RCON_CMDS_STARTUP", ""),
+            {key: saved_rules.get(key) for key in versioned_settings.MOVED_RULES}, version
+        )
     descriptor, temporary_name = tempfile.mkstemp(prefix="server.properties.", dir=destination.parent)
     try:
         with os.fdopen(descriptor, "wb") as output, source.open("rb") as input_file:
             shutil.copyfileobj(input_file, output)
+        prepare_versioned_file(server_dir, Path(temporary_name), environment)
         os.chmod(temporary_name, 0o644)
-        replace_authoritative_properties(server_dir, Path(temporary_name))
+        previous = create_properties_backup(server_dir, "before-restore")
+        replace_authoritative_properties(server_dir, Path(temporary_name), environment)
     finally:
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
@@ -388,6 +419,34 @@ def parse_import_properties(source: Path) -> dict[str, str]:
     return values
 
 
+def prepare_versioned_file(server_dir: Path, prepared: Path, environment: dict[str, str]) -> None:
+    original = parse_import_properties(prepared)
+    current = original.copy()
+    version = read_env(server_dir / ".env").get("MC_VERSION", "")
+    # Distributed properties often omit RCON. Preserve the toolkit's existing
+    # internal RCON configuration only when it was already enabled.
+    moved = any(
+        versioned_settings.mode(version, key) in ("camel", "namespaced")
+        and names[0] in original
+        for key, names in versioned_settings.MOVED_RULES.items()
+    )
+    if moved:
+        existing = parse_import_properties(server_dir / "data/server.properties")
+        if existing.get("enable-rcon", "false").lower() == "true":
+            if "enable-rcon" not in original:
+                current["enable-rcon"] = "true"
+            if current.get("enable-rcon", "false").lower() == "true":
+                for key in ("rcon.port", "rcon.password"):
+                    if key not in original and key in existing:
+                        current[key] = existing[key]
+    versioned_settings.prepare_initial(version, current, environment)
+    for key in set(original) - set(current):
+        remove_property_key(prepared, key)
+    for key, value in current.items():
+        if original.get(key) != value:
+            set_property_key(prepared, key, value)
+
+
 def import_properties(server_dir: Path, source: Path) -> Path | None:
     validate_properties_source(source)
     env_path = server_dir / "server.env"
@@ -399,7 +458,6 @@ def import_properties(server_dir: Path, source: Path) -> Path | None:
     if source.resolve() == destination.resolve():
         raise ValueError("The source is already this server's server.properties")
 
-    backup = create_properties_backup(server_dir, "before-import") if destination.exists() else None
     descriptor, temporary_name = tempfile.mkstemp(prefix="server.properties.", dir=destination.parent)
     try:
         with os.fdopen(descriptor, "wb") as output, source.open("rb") as input_file:
@@ -407,8 +465,10 @@ def import_properties(server_dir: Path, source: Path) -> Path | None:
         # The managed world is always mounted at data/world.
         set_property_key(Path(temporary_name), "level-name", "world")
         set_property_key(Path(temporary_name), "server-port", "25565")
+        prepare_versioned_file(server_dir, Path(temporary_name), values)
         os.chmod(temporary_name, 0o644)
-        replace_authoritative_properties(server_dir, Path(temporary_name))
+        backup = create_properties_backup(server_dir, "before-import") if destination.exists() else None
+        replace_authoritative_properties(server_dir, Path(temporary_name), values)
     finally:
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
@@ -576,6 +636,10 @@ def migrate_to_properties(server_dir: Path) -> Path:
         set_property_key(temporary, "level-name", "world")
         set_property_key(temporary, "server-port", "25565")
         temporary.chmod(0o644)
+        settings = parse_import_properties(temporary)
+        versioned_settings.prepare_initial(dotenv.get("MC_VERSION", ""), settings, retained)
+        for key in set(parse_import_properties(temporary)) - set(settings):
+            remove_property_key(temporary, key)
         retained.update(rcon_environment(parse_import_properties(temporary)))
 
         try:
