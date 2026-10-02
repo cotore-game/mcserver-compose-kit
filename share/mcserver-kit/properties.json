@@ -24,10 +24,12 @@
     "description": "properties.description.allow-flight"
   },
   "enable-command-block": {
-    "description": "properties.description.enable-command-block"
+    "description": "properties.description.enable-command-block",
+    "legacy": true
   },
   "pvp": {
-    "description": "properties.description.pvp"
+    "description": "properties.description.pvp",
+    "legacy": true
   },
   "view-distance": {
     "description": "properties.description.view-distance"
@@ -74,5 +76,145 @@
   },
   "require-resource-pack": {
     "description": "properties.description.require-resource-pack"
+  },
+  "accepts-transfers": {
+    "description": "properties.description.accepts-transfers"
+  },
+  "broadcast-console-to-ops": {
+    "description": "properties.description.broadcast-console-to-ops"
+  },
+  "broadcast-rcon-to-ops": {
+    "description": "properties.description.broadcast-rcon-to-ops"
+  },
+  "bug-report-link": {
+    "description": "properties.description.bug-report-link"
+  },
+  "chat-spam-threshold-seconds": {
+    "description": "properties.description.chat-spam-threshold-seconds"
+  },
+  "command-spam-threshold-seconds": {
+    "description": "properties.description.command-spam-threshold-seconds"
+  },
+  "enable-code-of-conduct": {
+    "description": "properties.description.enable-code-of-conduct"
+  },
+  "enable-jmx-monitoring": {
+    "description": "properties.description.enable-jmx-monitoring"
+  },
+  "enable-query": {
+    "description": "properties.description.enable-query"
+  },
+  "enable-status": {
+    "description": "properties.description.enable-status"
+  },
+  "enforce-secure-profile": {
+    "description": "properties.description.enforce-secure-profile"
+  },
+  "entity-broadcast-range-percentage": {
+    "description": "properties.description.entity-broadcast-range-percentage"
+  },
+  "function-permission-level": {
+    "description": "properties.description.function-permission-level"
+  },
+  "generate-structures": {
+    "description": "properties.description.generate-structures"
+  },
+  "generator-settings": {
+    "description": "properties.description.generator-settings"
+  },
+  "hide-online-players": {
+    "description": "properties.description.hide-online-players"
+  },
+  "initial-disabled-packs": {
+    "description": "properties.description.initial-disabled-packs"
+  },
+  "initial-enabled-packs": {
+    "description": "properties.description.initial-enabled-packs"
+  },
+  "level-seed": {
+    "description": "properties.description.level-seed"
+  },
+  "level-type": {
+    "description": "properties.description.level-type"
+  },
+  "log-ips": {
+    "description": "properties.description.log-ips"
+  },
+  "management-server-allowed-origins": {
+    "description": "properties.description.management-server-allowed-origins"
+  },
+  "management-server-enabled": {
+    "description": "properties.description.management-server-enabled"
+  },
+  "management-server-host": {
+    "description": "properties.description.management-server-host"
+  },
+  "management-server-port": {
+    "description": "properties.description.management-server-port"
+  },
+  "management-server-secret": {
+    "description": "properties.description.management-server-secret",
+    "secret": true
+  },
+  "management-server-tls-enabled": {
+    "description": "properties.description.management-server-tls-enabled"
+  },
+  "management-server-tls-keystore": {
+    "description": "properties.description.management-server-tls-keystore"
+  },
+  "management-server-tls-keystore-password": {
+    "description": "properties.description.management-server-tls-keystore-password",
+    "secret": true
+  },
+  "max-chained-neighbor-updates": {
+    "description": "properties.description.max-chained-neighbor-updates"
+  },
+  "max-tick-time": {
+    "description": "properties.description.max-tick-time"
+  },
+  "max-world-size": {
+    "description": "properties.description.max-world-size"
+  },
+  "network-compression-threshold": {
+    "description": "properties.description.network-compression-threshold"
+  },
+  "op-permission-level": {
+    "description": "properties.description.op-permission-level"
+  },
+  "pause-when-empty-seconds": {
+    "description": "properties.description.pause-when-empty-seconds"
+  },
+  "prevent-proxy-connections": {
+    "description": "properties.description.prevent-proxy-connections"
+  },
+  "query.port": {
+    "description": "properties.description.query.port"
+  },
+  "rate-limit": {
+    "description": "properties.description.rate-limit"
+  },
+  "region-file-compression": {
+    "description": "properties.description.region-file-compression"
+  },
+  "resource-pack-prompt": {
+    "description": "properties.description.resource-pack-prompt"
+  },
+  "server-ip": {
+    "description": "properties.description.server-ip"
+  },
+  "status-heartbeat-interval": {
+    "description": "properties.description.status-heartbeat-interval"
+  },
+  "sync-chunk-writes": {
+    "description": "properties.description.sync-chunk-writes"
+  },
+  "text-filtering-config": {
+    "description": "properties.description.text-filtering-config"
+  },
+  "text-filtering-version": {
+    "description": "properties.description.text-filtering-version"
+  },
+  "use-native-transport": {
+    "description": "properties.description.use-native-transport"
   }
 }

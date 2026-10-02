@@ -34,6 +34,40 @@ class EditorTests(unittest.TestCase):
                 tui.config.validate_property_key(key)
                 self.assertIn(metadata["description"], messages)
 
+    def test_catalog_covers_minecraft_26_3(self):
+        fixture = ROOT / "tests/fixtures/minecraft-26.3-property-keys.txt"
+        official = {line for line in fixture.read_text(encoding="utf-8").splitlines()
+                    if line and not line.startswith("#")}
+        suggested = {key for key, metadata in self.editor.catalog.items()
+                     if not metadata.get("legacy", False)}
+        self.assertEqual(len(official), 69)
+        self.assertEqual(suggested, official)
+
+    def test_list_previews_values_without_exposing_secrets(self):
+        self.properties.write_text(
+            "motd=日本語テキストを含む長いサーバー説明の続き\n"
+            "management-server-secret=private-management-token\n"
+            "mod.example=\n", encoding="utf-8")
+        self.editor.dialog.return_value = None
+        self.assertFalse(self.editor.run())
+        items = self.editor.dialog.call_args.args
+        self.assertIn("…", items[items.index("motd") + 1])
+        self.assertTrue(items[items.index("motd") + 1].startswith("日本語"))
+        self.assertTrue(items[items.index("management-server-secret") + 1].startswith("********"))
+        self.assertNotIn("private-management-token", str(items))
+        self.assertTrue(items[items.index("mod.example") + 1].startswith('""'))
+
+    def test_add_suggests_current_keys_but_not_legacy_keys(self):
+        self.editor.dialog.return_value = None
+        self.editor.add({})
+        choices = self.editor.dialog.call_args.args
+        self.assertIn("management-server-enabled", choices)
+        self.assertNotIn("pvp", choices)
+        self.assertNotIn("enable-command-block", choices)
+
+    def test_unknown_secret_key_is_masked(self):
+        self.assertEqual(self.editor.preview("mod.access-token", "top-secret"), "********")
+
     def test_missing_translation_falls_back_to_english(self):
         (self.root / "locales").mkdir()
         english = {"a": "English A", "b": "English B"}

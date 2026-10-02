@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import unicodedata
 from pathlib import Path
 import subprocess
 import sys
@@ -39,6 +40,30 @@ class Editor:
         message = self.catalog.get(key, {}).get("description")
         return self.messages.get(message, self.text("unknown"))
 
+    def is_secret(self, key: str) -> bool:
+        return self.catalog.get(key, {}).get("secret", False) or any(
+            word in key.lower() for word in ("password", "secret", "token")
+        )
+
+    def preview(self, key: str, value: str, width: int = 24) -> str:
+        if not value:
+            return '""'
+        if self.is_secret(key):
+            return "********"
+        visible = "".join(char if not unicodedata.category(char).startswith("C") else "·"
+                          for char in value)
+        cells = [0 if unicodedata.combining(char) else (
+            2 if unicodedata.east_asian_width(char) in "WF" else 1) for char in visible]
+        budget = width - 1 if sum(cells) > width else width
+        result = ""
+        used = 0
+        for char, size in zip(visible, cells):
+            if used + size > budget:
+                return result + "…"
+            result += char
+            used += size
+        return result
+
     def dialog(self, kind: str, prompt: str, *args: str) -> str | None:
         dimensions = ["22", "90", "14"] if kind == "menu" else ["14", "90"]
         session = os.environ.get("MCSERVER_KIT_TUI_SOCKET")
@@ -72,9 +97,7 @@ class Editor:
 
     def edit(self, key: str, current: str | None) -> None:
         prompt = f"{key}\n{self.description(key)}"
-        secret = self.catalog.get(key, {}).get("secret", False) or any(
-            word in key.lower() for word in ("password", "secret", "token")
-        )
+        secret = self.is_secret(key)
         if current is not None:
             shown = "********" if secret else current
             action = self.dialog("menu", f"{prompt}\n\n{shown}",
@@ -97,7 +120,8 @@ class Editor:
 
     def add(self, values: dict[str, str]) -> None:
         items = ["@custom", self.text("custom")]
-        for key in sorted(self.catalog.keys() - values.keys()):
+        for key in sorted(key for key in self.catalog.keys() - values.keys()
+                          if not self.catalog[key].get("legacy", False)):
             items.extend((key, self.description(key)))
         key = self.dialog("menu", self.text("add_hint"), *items)
         if key is None:
@@ -121,7 +145,7 @@ class Editor:
             values = self.values()
             items = ["@add", self.text("add")]
             for key in sorted(values):
-                items.extend((key, self.description(key)))
+                items.extend((key, f"{self.preview(key, values[key])} · {self.description(key)}"))
             selected = self.dialog("menu", self.text("hint"), *items)
             if selected is None:
                 return self.changed
