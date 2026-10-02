@@ -143,6 +143,26 @@ def sync_rcon_environment(properties_path: Path) -> None:
         write_env(environment, values)
 
 
+def replace_authoritative_properties(server_dir: Path, prepared: Path) -> None:
+    """Commit prepared properties and their derived RCON client settings together."""
+    destination = server_dir / "data" / "server.properties"
+    environment = server_dir / "server.env"
+    values = read_env(environment)
+    if values.get("OVERRIDE_SERVER_PROPERTIES", "true").lower() != "false":
+        raise ValueError("Migrate to data/server.properties before replacing it")
+    values.update(rcon_environment(parse_import_properties(prepared)))
+    previous_env = environment.read_bytes() if environment.is_file() else None
+    write_env(environment, values)
+    try:
+        os.replace(prepared, destination)
+    except Exception:
+        if previous_env is None:
+            environment.unlink(missing_ok=True)
+        else:
+            atomic_write(environment, previous_env.decode("utf-8"), 0o600)
+        raise
+
+
 def write_env(path: Path, values: dict[str, str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     contents = "".join(
@@ -280,8 +300,7 @@ def restore_properties_backup(server_dir: Path, backup_id: str) -> Path:
         with os.fdopen(descriptor, "wb") as output, source.open("rb") as input_file:
             shutil.copyfileobj(input_file, output)
         os.chmod(temporary_name, 0o644)
-        os.replace(temporary_name, destination)
-        sync_rcon_environment(destination)
+        replace_authoritative_properties(server_dir, Path(temporary_name))
     finally:
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
@@ -389,8 +408,7 @@ def import_properties(server_dir: Path, source: Path) -> Path | None:
         set_property_key(Path(temporary_name), "level-name", "world")
         set_property_key(Path(temporary_name), "server-port", "25565")
         os.chmod(temporary_name, 0o644)
-        os.replace(temporary_name, destination)
-        sync_rcon_environment(destination)
+        replace_authoritative_properties(server_dir, Path(temporary_name))
     finally:
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
@@ -434,7 +452,14 @@ def atomic_write(path: Path, contents: str, mode: int | None = None) -> None:
 
 def migrate_compose(path: Path) -> None:
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-    managed = set(MANAGED_DEFAULTS)
+    managed = set(MANAGED_DEFAULTS) | set(PROPERTY_KEYS) | {
+        "CUSTOM_SERVER_PROPERTIES",
+        "OVERRIDE_SERVER_PROPERTIES",
+        "LEVEL",
+        "ENABLE_RCON",
+        "RCON_PORT",
+        "RCON_PASSWORD",
+    }
     output: list[str] = []
     in_minecraft = False
     env_file_found = False
@@ -464,33 +489,6 @@ def migrate_compose(path: Path) -> None:
             if line == "    env_file:\n":
                 output.insert(index + 1, "      - server.env\n")
                 break
-    atomic_write(path, "".join(output))
-
-
-def migrate_compose_to_properties(path: Path) -> None:
-    migrate_compose(path)  # Ensure old Compose files load retained non-property settings.
-    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-    property_variables = set(PROPERTY_KEYS) | {
-        "CUSTOM_SERVER_PROPERTIES",
-        "OVERRIDE_SERVER_PROPERTIES",
-        "LEVEL",
-        "ENABLE_RCON",
-        "RCON_PORT",
-        "RCON_PASSWORD",
-    }
-    output: list[str] = []
-    in_minecraft = False
-    for line in lines:
-        if line == "  minecraft:\n":
-            in_minecraft = True
-            output.append(line)
-            continue
-        if in_minecraft and re.match(r"^  [A-Za-z0-9_-]+:", line):
-            in_minecraft = False
-        match = re.match(r"^      ([A-Z][A-Z0-9_]*):", line) if in_minecraft else None
-        if match and match.group(1) in property_variables:
-            continue
-        output.append(line)
     atomic_write(path, "".join(output))
 
 
@@ -582,7 +580,7 @@ def migrate_to_properties(server_dir: Path) -> Path:
 
         try:
             write_env(env_path, retained)
-            migrate_compose_to_properties(compose)
+            migrate_compose(compose)
             os.replace(temporary, properties_path)
         except Exception:
             for original in (compose, env_path):

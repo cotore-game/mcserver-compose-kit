@@ -3,6 +3,7 @@
 import importlib.util
 import json
 from pathlib import Path
+from unittest import mock
 import tempfile
 import unittest
 
@@ -93,6 +94,41 @@ class InitializationTests(unittest.TestCase):
         self.assertEqual(config.read_env(self.environment)["RCON_PASSWORD"], original)
         config.remove_property_key(self.properties, "enable-rcon")
         self.assertEqual(config.read_env(self.environment)["ENABLE_RCON"], "false")
+
+
+    def test_import_replace_failure_preserves_both_settings(self):
+        self.initialize()
+        source = Path(self.workspace.name) / "server.properties"
+        source.write_text("motd=Replacement\n", encoding="utf-8")
+        original = self.properties.read_bytes(), self.environment.read_bytes()
+        replace = config.os.replace
+
+        def fail_properties_replace(source_path, destination_path):
+            if Path(destination_path) == self.properties:
+                raise OSError("simulated replacement failure")
+            return replace(source_path, destination_path)
+
+        with mock.patch.object(config.os, "replace", side_effect=fail_properties_replace):
+            with self.assertRaisesRegex(OSError, "simulated replacement failure"):
+                config.import_properties(self.server, source)
+        self.assertEqual(original, (self.properties.read_bytes(), self.environment.read_bytes()))
+
+    def test_restore_replace_failure_preserves_both_settings(self):
+        self.initialize()
+        backup = config.create_properties_backup(self.server)
+        config.set_property_key(self.properties, "rcon.password", "modified")
+        original = self.properties.read_bytes(), self.environment.read_bytes()
+        replace = config.os.replace
+
+        def fail_properties_replace(source_path, destination_path):
+            if Path(destination_path) == self.properties:
+                raise OSError("simulated replacement failure")
+            return replace(source_path, destination_path)
+
+        with mock.patch.object(config.os, "replace", side_effect=fail_properties_replace):
+            with self.assertRaisesRegex(OSError, "simulated replacement failure"):
+                config.restore_properties_backup(self.server, backup.name)
+        self.assertEqual(original, (self.properties.read_bytes(), self.environment.read_bytes()))
 
 
 if __name__ == "__main__":
