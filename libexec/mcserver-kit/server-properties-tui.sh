@@ -12,6 +12,7 @@ SERVER_DIR="${2-}"
 SERVER_ENV="${SERVER_DIR}/server.env"
 SERVER_PROPERTIES="${SERVER_DIR}/data/server.properties"
 CONFIG_TOOL="${SCRIPT_DIR}/server-config.py"
+VERSION_TOOL="${SCRIPT_DIR}/versioned_settings.py"
 changed=false
 manual_properties=false
 
@@ -46,6 +47,11 @@ run_checked() {
 }
 
 setting_get() {
+  case "$1" in
+    PVP | ENABLE_COMMAND_BLOCK | ALLOW_NETHER | SPAWN_MONSTERS)
+      python3 "$VERSION_TOOL" get "$SERVER_DIR" "$1" "$2"
+      return ;;
+  esac
   if [[ "$manual_properties" == true ]]; then
     case "$1" in
       WHITELIST | EXISTING_WHITELIST_FILE | OPS | EXISTING_OPS_FILE)
@@ -58,7 +64,23 @@ setting_get() {
 }
 
 setting_set() {
-  local property_key error
+  local property_key error setting_mode
+  case "$1" in
+    PVP | ENABLE_COMMAND_BLOCK | ALLOW_NETHER | SPAWN_MONSTERS | SPAWN_ANIMALS | SPAWN_NPCS)
+      setting_mode="$(python3 "$VERSION_TOOL" classify "$SERVER_DIR" "$1")" || die "$(tr properties.source_check_failed)"
+      case "$setting_mode" in
+        camel | namespaced)
+          property_key="$(python3 "$CONFIG_TOOL" property-key "$1")"
+          if ! error="$("${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" properties set "$property_key" "$2" 2>&1)"; then
+            die "$error"
+          fi
+          changed=true
+          return ;;
+        removed | unknown)
+          die "$(tr properties.version_unsupported "$1" "$(python3 "$CONFIG_TOOL" get "${SERVER_DIR}/.env" MC_VERSION unknown)")" ;;
+      esac
+      ;;
+  esac
   if [[ "$manual_properties" == true ]]; then
     case "$1" in
       WHITELIST | EXISTING_WHITELIST_FILE | OPS | EXISTING_OPS_FILE)
@@ -323,6 +345,7 @@ main() {
   manual_properties=true
   cd -- "$SERVER_DIR"
   run_checked docker compose config --quiet
+  run_checked python3 "$VERSION_TOOL" sync "$SERVER_DIR"
 
   while true; do
     items=(
@@ -357,19 +380,22 @@ main() {
       __restore) restore_properties ;;
       __import) import_properties || true ;;
       __more)
-        selected="$(whiptail --title "${SERVER_ID}" --menu "$(tr properties.more_settings)" 24 90 15 \
-          FORCE_GAMEMODE "$(menu_item "$(tr properties.force_gamemode)" "$(setting_get FORCE_GAMEMODE false)")" \
-          HARDCORE "$(menu_item "$(tr properties.hardcore)" "$(setting_get HARDCORE false)")" \
-          SPAWN_PROTECTION "$(menu_item "$(tr properties.spawn_protection)" "$(setting_get SPAWN_PROTECTION 0)")" \
-          PLAYER_IDLE_TIMEOUT "$(menu_item "$(tr properties.idle_timeout)" "$(setting_get PLAYER_IDLE_TIMEOUT 0)")" \
-          ALLOW_NETHER "$(menu_item "$(tr properties.allow_nether)" "$(setting_get ALLOW_NETHER true)")" \
-          SPAWN_ANIMALS "$(menu_item "$(tr properties.spawn_animals)" "$(setting_get SPAWN_ANIMALS true)")" \
-          SPAWN_MONSTERS "$(menu_item "$(tr properties.spawn_monsters)" "$(setting_get SPAWN_MONSTERS true)")" \
-          SPAWN_NPCS "$(menu_item "$(tr properties.spawn_npcs)" "$(setting_get SPAWN_NPCS true)")" \
-          ENABLE_STATUS "$(menu_item "$(tr properties.enable_status)" "$(setting_get ENABLE_STATUS true)")" \
-          HIDE_ONLINE_PLAYERS "$(menu_item "$(tr properties.hide_online_players)" "$(setting_get HIDE_ONLINE_PLAYERS false)")" \
-          MAX_TICK_TIME "$(menu_item "$(tr properties.max_tick_time)" "$(setting_get MAX_TICK_TIME 60000)")" \
-          3>&1 1>&2 2>&3)" || continue
+        more_items=(
+          FORCE_GAMEMODE "$(menu_item "$(tr properties.force_gamemode)" "$(setting_get FORCE_GAMEMODE false)")"
+          HARDCORE "$(menu_item "$(tr properties.hardcore)" "$(setting_get HARDCORE false)")"
+          SPAWN_PROTECTION "$(menu_item "$(tr properties.spawn_protection)" "$(setting_get SPAWN_PROTECTION 0)")"
+          PLAYER_IDLE_TIMEOUT "$(menu_item "$(tr properties.idle_timeout)" "$(setting_get PLAYER_IDLE_TIMEOUT 0)")"
+          ALLOW_NETHER "$(menu_item "$(tr properties.allow_nether)" "$(setting_get ALLOW_NETHER true)")"
+          SPAWN_MONSTERS "$(menu_item "$(tr properties.spawn_monsters)" "$(setting_get SPAWN_MONSTERS true)")"
+          ENABLE_STATUS "$(menu_item "$(tr properties.enable_status)" "$(setting_get ENABLE_STATUS true)")"
+          HIDE_ONLINE_PLAYERS "$(menu_item "$(tr properties.hide_online_players)" "$(setting_get HIDE_ONLINE_PLAYERS false)")"
+          MAX_TICK_TIME "$(menu_item "$(tr properties.max_tick_time)" "$(setting_get MAX_TICK_TIME 60000)")"
+        )
+        if [[ "$(python3 "$VERSION_TOOL" classify "$SERVER_DIR" SPAWN_ANIMALS)" == property ]]; then
+          more_items+=(SPAWN_ANIMALS "$(menu_item "$(tr properties.spawn_animals)" "$(setting_get SPAWN_ANIMALS true)")")
+          more_items+=(SPAWN_NPCS "$(menu_item "$(tr properties.spawn_npcs)" "$(setting_get SPAWN_NPCS true)")")
+        fi
+        selected="$(whiptail --title "${SERVER_ID}" --menu "$(tr properties.more_settings)" 24 90 15 "${more_items[@]}" 3>&1 1>&2 2>&3)" || continue
         edit_property "$selected"
         ;;
       __resource)

@@ -128,6 +128,8 @@ mcserver-kit create
 LATEST
 ```
 
+`LATEST`は作成時にMojangのリリース一覧から実際のバージョンを取得し、その番号で固定します。後日の再起動でもバージョン別設定が変わらないためです。取得できない場合は具体的な番号を入力してください。
+
 `docker.java_image_tag: "auto"`では次のようにJavaイメージを選びます。
 
 | Minecraftバージョン | イメージタグ |
@@ -194,7 +196,7 @@ mcserver-kit server <server-id> properties
 
 MOTD、難易度、ゲームモード、最大人数、オンラインモード、ホワイトリスト、OP、飛行、コマンドブロック、PvP、描画・シミュレーション距離、スポーン保護、ネザー、Mob/NPC生成、リソースパックなどを編集できます。
 
-新規サーバーは初回起動前の作成時点から`data/server.properties`を正本として使います。`server.env`にはホワイトリスト・OPのメンバー管理設定を残し、`OVERRIDE_SERVER_PROPERTIES=false`でitzgによるプロパティ上書きを止めます。バージョン・メモリ等のコンテナ設定は`.env`とComposeで管理します。既存サーバーは明示的に移行するまで従来の設定方式を維持します。
+新規サーバーは初回起動前の作成時点から`data/server.properties`を正本として使います。`server.env`にはホワイトリスト・OPのメンバー管理と、バージョン別の起動時ゲームルールを残し、`OVERRIDE_SERVER_PROPERTIES=false`でitzgによるプロパティ上書きを止めます。バージョン・メモリ等のコンテナ設定は`.env`とComposeで管理します。既存サーバーは明示的に移行するまで従来の設定方式を維持します。
 
 既存サーバーは、`data/server.properties`を正本とする方式へ移行できます。先にサーバーを停止し、次を実行します。
 
@@ -216,7 +218,7 @@ mcserver-kit server <サーバーID> properties restore <バックアップID>
 mcserver-kit server <サーバーID> properties import /path/to/server.properties
 ```
 
-変更を伴うコマンドはサーバーの停止を要求し、変更前にスナップショットを作成します。バックアップは`backups/server-properties/`へ保存します。復元時にも、置換される現在のファイルを先にバックアップします。
+変更を伴うコマンドはサーバーの停止を要求し、変更前にスナップショットを作成します。バックアップは`backups/server-properties/`へ保存し、管理対象のゲームルールも非公開の`.properties.rules.json`へ併せて保存します。復元時にも、置換される現在の設定を先にバックアップします。
 
 新規作成・移行済みのサーバーでは、インポートは`data/server.properties`を置換し、正本の管理方式を維持します。ワールド配置とポートの制約として`level-name=world`、`server-port=25565`を保持します。
 
@@ -224,7 +226,7 @@ mcserver-kit server <サーバーID> properties import /path/to/server.propertie
 
 旧サーバーの設定画面を開くと、`data/server.properties`を直接正本にする一段階の移行を確認します。先にサーバーを停止してください。移行前のCompose・環境設定・プロパティはバックアップします。移行後は「server.propertiesをバックアップ」「server.propertiesを復元」を利用でき、復元時も現在のファイルを退避してから置換します。
 
-説明カタログは、Minecraft Java 26.3の公式サーバーが生成する全69キーに英日で対応しています。`pvp`と`enable-command-block`などの旧キーは既存ファイルの閲覧用に残し、新規追加の候補からは外しています。26.3ではゲームルールを使用してください。一覧では説明の前に現在値を表示し、長い値は`…`で省略、秘密値は伏せます。項目を選ぶと説明全文を確認できます。MODなど未登録のキーも編集可能です。値は文字列で保存し、バージョンごとの型・範囲の完全な検証は行いません。
+説明カタログは、Minecraft Java 26.3の公式サーバーが生成する全69キーに英日で対応しています。よく使う設定とCLIでは`pvp`、`enable-command-block`、`allow-nether`、`spawn-monsters`を1.21.8以前は`server.properties`、1.21.9～1.21.10は従来名のゲームルール、1.21.11以降は名前空間付きゲームルールへ振り分けます。ゲームルールはitzgの`RCON_CMDS_STARTUP`で起動時に適用するため、RCONの有効化とパスワードが必要です。旧キーが残る既存サーバーは、設定画面を開くとバックアップ後に移行します。RCONが無効な既存サーバーを勝手に有効化せず、ゲームルールを編集・移行する前に明示的な設定を求めます。`spawn-animals`と`spawn-npcs`はVanillaの1.21.2で廃止され、直接の代替設定もないため、新版の共通設定からは隠し、CLIでは拒否します。旧キーはカタログで閲覧できますが新規追加候補には出しません。一覧では説明の前に現在値を表示し、長い値は`…`で省略、秘密値は伏せます。項目を選ぶと説明全文を確認できます。MODなど未登録のキーも編集可能です。値は文字列で保存し、バージョンごとの型・範囲の完全な検証は行いません。
 
 新規作成時はランダムなRCONパスワードも生成します。`server.env`の`ENABLE_RCON`・`RCON_PORT`・`RCON_PASSWORD`は、プロパティから生成するitzg側クライアント用の値です。RCONの変更にはプロパティ操作コマンドを使ってください。編集・インポート・復元時にこれらの値も更新します。変更した環境変数は`docker compose up -d`でコンテナを再作成して反映します。外部エディターによるRCON設定変更と`docker compose restart`だけでは、このクライアント設定は更新されません。
 

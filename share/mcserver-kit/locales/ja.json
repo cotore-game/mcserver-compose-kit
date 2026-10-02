@@ -1,5 +1,6 @@
 {
   "properties.editor.title": "server.propertiesの全キー",
+  "properties.version_unsupported": "この設定（%s）はMinecraft %sでは利用できません。対応バージョンを指定するか、適切なMOD/プラグインを使用してください。Vanillaには同等の設定がありません。",
   "properties.editor.unknown": "説明は未登録です。サーバーまたはMODの説明を確認してください。",
   "properties.editor.hint": "現在値の後に説明を表示します。キーを選択すると詳細の確認・編集・削除ができます。",
   "properties.editor.edit": "値を編集",
@@ -20,8 +21,8 @@
   "properties.description.white-list": "ホワイトリストに登録されたプレイヤーだけ参加可能にするか。",
   "properties.description.enforce-whitelist": "ホワイトリスト対象外になったプレイヤーを切断するか。",
   "properties.description.allow-flight": "飛行しているプレイヤーの自動キックを抑止するか（trueで抑止）。",
-  "properties.description.enable-command-block": "旧キー。Minecraft 26.3ではenableCommandBlocksゲームルールを使用します。",
-  "properties.description.pvp": "旧キー。Minecraft 26.3ではpvpゲームルールを使用します。",
+  "properties.description.enable-command-block": "旧キー。1.21.9以降はゲームルール（1.21.11以降はminecraft:command_blocks_work）を使用します。",
+  "properties.description.pvp": "旧キー。1.21.9以降はゲームルール（1.21.11以降はminecraft:pvp）を使用します。",
   "properties.description.view-distance": "プレイヤーに送信するチャンクの最大距離。",
   "properties.description.simulation-distance": "ワールドのシミュレーションを行うチャンク距離。",
   "properties.description.spawn-protection": "スポーン地点周辺の保護範囲（0で無効）。",

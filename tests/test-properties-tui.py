@@ -175,7 +175,7 @@ class EditorTests(unittest.TestCase):
             saved = self.properties.read_bytes()
             self.assertFalse(self.editor.mutate("remove", "mod.example"))
             self.assertEqual(self.properties.read_bytes(), saved)
-            self.assertEqual(len(list((self.server / "backups/server-properties").glob("*"))), 1)
+            self.assertEqual(len(list((self.server / "backups/server-properties").glob("*.properties"))), 1)
             restore = subprocess.run(
                 [str(tui.HERE / "server-manager.sh"), "server", "demo",
                  "properties", "restore", backups[0].name],
@@ -183,7 +183,7 @@ class EditorTests(unittest.TestCase):
             )
             self.assertNotEqual(restore.returncode, 0)
             self.assertEqual(self.properties.read_bytes(), saved)
-            self.assertEqual(len(list((self.server / "backups/server-properties").glob("*"))), 1)
+            self.assertEqual(len(list((self.server / "backups/server-properties").glob("*.properties"))), 1)
 
     def test_shell_menu_opens_editor_and_returns_after_save(self):
         (self.server / "compose.yaml").write_text("services: {}\n")
@@ -226,7 +226,7 @@ sys.exit(status)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(queue.read_text()), [])
         self.assertEqual(self.editor.values()["mod.example"], "new value")
-        self.assertEqual(len(list((self.server / "backups/server-properties").glob("*"))), 1)
+        self.assertEqual(len(list((self.server / "backups/server-properties").glob("*.properties"))), 1)
 
     def test_common_setting_uses_guarded_backup_path(self):
         (self.server / "compose.yaml").write_text("services: {}\n")
