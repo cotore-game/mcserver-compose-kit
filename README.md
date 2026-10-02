@@ -47,7 +47,7 @@ Install a specific release:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cotore-game/mcserver-compose-kit/main/install.sh | \
-  bash -s -- --version v1.1.4
+  bash -s -- --version v1.2.0
 ```
 
 The installer downloads the release archive, verifies its SHA-256 checksum, and installs the program under `~/.local/share/mcserver-compose-kit`. It also adds a managed PATH block for `~/.local/bin` to `~/.bashrc`.
@@ -92,7 +92,9 @@ mcserver-kit
 
 The dashboard includes server creation and management, global settings, MCID templates, language selection, diagnostics, and help. Use the arrow keys to select an item and Enter to open it.
 
-While server actions or update checks run, a single waiting dialog shows a braille spinner. Command output is collected in a temporary file and displayed afterward, including errors. The waiting dialog no longer opens and closes for each animation frame. Menus, buttons, and navigation retain the existing layout; this fix does not redesign transitions between menus.
+The TUI keeps one terminal session open between menus. While Docker state or the next screen is loading, the frame stays visible with a braille spinner; no percentage or progress bar is shown. Tab switches between OK and Cancel, and Esc returns to the previous menu (or exits at the home screen). Results stay open until dismissed; use the arrow keys or Page Up/Down to scroll.
+
+Server creation and live logs still use their line-oriented screens inside the same terminal session. Follow their return instructions to get back to the menus. The persistent renderer uses Python's standard-library curses module, available with Ubuntu's Python installation; no pip packages are needed.
 
 Check the installed toolkit version with:
 
@@ -124,6 +126,8 @@ Examples of accepted versions:
 1.21.2
 LATEST
 ```
+
+`LATEST` is resolved against Mojang's release manifest when the server is created, then stored as a concrete version. This keeps the version-dependent settings stable across later restarts. If the manifest cannot be reached, enter a specific version instead.
 
 With `docker.java_image_tag: "auto"`, the Java image is selected as follows:
 
@@ -170,6 +174,7 @@ mcserver-kit server <server-id> status
 mcserver-kit server <server-id> logs
 mcserver-kit server <server-id> logs --no-follow
 mcserver-kit server <server-id> down
+mcserver-kit server <server-id> delete
 mcserver-kit server <server-id> properties
 mcserver-kit server <server-id> import-properties /path/to/server.properties
 mcserver-kit server <server-id> open data
@@ -177,6 +182,8 @@ mcserver-kit server <server-id> open server
 ```
 
 `stop` and `shutdown` stop the container without removing it. `down` removes the container and network. These commands do not delete the server's `data/` directory.
+
+`delete` permanently removes the whole managed server folder, including its world data, settings, secrets, and backups. It displays the absolute target path, asks whether to continue, and then requires the exact server ID as a second confirmation. Containers and networks are removed first; if `docker compose down` fails, the server folder is preserved.
 
 ## Edit Minecraft settings
 
@@ -188,13 +195,45 @@ mcserver-kit server <server-id> properties
 
 The editor covers MOTD, difficulty, game mode, player limit, online mode, whitelist, operators, flight, command blocks, PvP, view and simulation distance, spawn protection, Nether and entity spawning, and resource packs.
 
-Normally, `server.env` is the source of truth for settings managed by the toolkit. Docker Compose passes these values to `itzg/minecraft-server`, which applies them to `server.properties` when the container starts.
+New servers use `data/server.properties` as the source of truth from creation, before the first start. `server.env` keeps whitelist/operator membership and version-dependent startup game rules, and disables itzg property overrides with `OVERRIDE_SERVER_PROPERTIES=false`. Version, memory, and other container settings remain in `.env` and Compose. Existing servers keep their previous settings until explicitly migrated.
 
-For a distributed `server.properties`, stop the server and choose **Server settings → Import server.properties**, or run `mcserver-kit server <server-id> import-properties /path/to/server.properties`. On WSL, the settings screen offers a Windows file picker when Windows dialogs are enabled. The existing data file is backed up before replacement. Supported properties are imported into `server.env`; additional keys are stored in `CUSTOM_SERVER_PROPERTIES`. `server.env` remains the source of truth, and the imported file is also copied to `data/server.properties`. Java Properties escapes such as `\:` are decoded. If the distributed `level-name` differs, the toolkit keeps its existing `data/world` layout and Compose's `LEVEL=world` setting. A nonstandard server port or malformed property is rejected before changing the server. Do not edit the file while the server is running.
+An existing server can be migrated so that `data/server.properties` becomes the source of truth. Stop the server first, then run:
+
+```bash
+mcserver-kit server <server-id> properties migrate
+```
+
+The migration preserves the effective values from `server.env`, `CUSTOM_SERVER_PROPERTIES`, Compose, and the existing file. It stores the previous files under `backups/source-migrations/`, disables itzg property overrides, and keeps whitelist and operator membership settings separate. The CLI can then manage every Minecraft or mod property by its original key:
+
+```bash
+mcserver-kit server <server-id> properties list
+mcserver-kit server <server-id> properties get motd
+mcserver-kit server <server-id> properties set motd "My server"
+mcserver-kit server <server-id> properties add mod.custom-key value
+mcserver-kit server <server-id> properties remove mod.custom-key
+mcserver-kit server <server-id> properties backup
+mcserver-kit server <server-id> properties backups
+mcserver-kit server <server-id> properties restore <backup-id>
+mcserver-kit server <server-id> properties import /path/to/server.properties
+```
+
+Mutating commands require the server to be stopped and create a snapshot before changing settings. Backups are stored under `backups/server-properties/`; snapshots include a private `.properties.rules.json` companion for the managed game rules. A restore also backs up the settings it replaces.
+
+For new or migrated servers, imports replace `data/server.properties` and preserve its authority. The managed layout keeps `level-name=world` and `server-port=25565`.
+
+Open `mcserver-kit server <server-id> properties` and choose **All server.properties keys** to browse the file using Minecraft's original key names. Select a key to view, edit, or remove it; **Add a key** offers described suggestions and manual entry for other keys, including mod settings. Cancel returns to the previous menu. Both common settings and the all-keys editor use the CLI's stop check and automatic backup when saving property changes. Removing a key may let Minecraft recreate its default at the next startup.
+
+Opening Server settings for an older server offers a one-step migration directly to `data/server.properties` as the source of truth. Stop the server before confirming; the old Compose, environment, and properties files are backed up. The settings menu then offers **Back up server.properties** and **Restore server.properties**. Restore lists snapshots, asks for confirmation, and backs up the current file before replacing it.
+
+The catalog describes all 69 keys generated by vanilla Minecraft Java 26.3 in English and Japanese. The common settings and CLI route `pvp`, `enable-command-block`, `allow-nether`, and `spawn-monsters` to `server.properties` through 1.21.8, to camel-case game rules in 1.21.9–1.21.10, and to namespaced game rules in 1.21.11 and later. The game rules are applied at startup through itzg's `RCON_CMDS_STARTUP`; the server must have RCON enabled with a password. Opening settings migrates obsolete keys from older kit-created files after backing them up. Existing RCON-disabled servers are not silently reconfigured: enable RCON and set a password explicitly before migrating or editing these rules. Vanilla removed `spawn-animals` and `spawn-npcs` in 1.21.2 without direct replacements, so they are hidden from newer-version common settings and rejected by the CLI. Older keys remain readable in the catalog but are not suggested for new entries. The list previews each current value before its description, shortens long values with `…`, and masks secrets. Select a key for its full description. Mod and other unlisted keys remain editable. Values are saved as text without full version-specific type or range validation.
+
+New servers also receive a random RCON password. `ENABLE_RCON`, `RCON_PORT`, and `RCON_PASSWORD` in `server.env` are derived client settings for itzg, not independent inputs. Use the properties commands when changing RCON settings: edits, imports, and restores refresh these values. Recreate the container with `docker compose up -d` to reload changed environment values. Editing RCON properties externally and running `docker compose restart` does not refresh this client configuration.
+
+To use a distributed `server.properties`, stop the server and choose **Server settings → Import server.properties**, or run `mcserver-kit server <server-id> import-properties /path/to/server.properties`. On WSL, the settings screen offers a Windows file picker when Windows dialogs are enabled. An older server is migrated directly to `data/server.properties` authority before import; its previous settings and file are backed up. The imported file becomes authoritative, including custom keys. Java Properties escapes such as `\:` are supported. The managed layout remains `data/world` with `level-name=world`; a nonstandard server port or malformed property is rejected before migration or import. Do not edit the file while the server is running.
 
 The dashboard can also open the server folder or its persistent `data/` folder in Windows Explorer. From a terminal, use `mcserver-kit server <server-id> open server` or `open data`. This requires WSL interop with Explorer.
 
-When an older server is opened for the first time, the editor asks before migrating it. The original Compose file is saved as `compose.yaml.mcserver-kit.bak`.
+When an older server is opened for the first time, the editor asks before migrating it. Previous files are saved under `backups/source-migrations/`.
 
 ## MCID templates
 

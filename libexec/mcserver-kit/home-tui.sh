@@ -4,35 +4,22 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -z "${MCSERVER_KIT_TUI_SOCKET:-}" && -t 0 && -t 1 ]]; then
+  exec python3 "${SCRIPT_DIR}/tui-session.py" run bash "${BASH_SOURCE[0]}" "$@"
+fi
 CONFIG_FILE="${MCSERVER_KIT_CONFIG:-${HOME}/.config/mcserver-compose-kit/config.yml}"
 ROOT_DIR="${MCSERVER_KIT_ROOT:-$(cd -- "${SCRIPT_DIR}/../.." && pwd)}"
 CONFIG_VALUE="${SCRIPT_DIR}/config-value.py"
 VERSION="$(head -n 1 "${ROOT_DIR}/VERSION" 2>/dev/null || printf unknown)"
 TEMP_FILES=()
+SERVER_LISTING=''
+SERVER_LISTING_AT=0
+SERVER_LISTING_VALID=false
 
 # shellcheck source=libexec/mcserver-kit/i18n.sh
 source "${SCRIPT_DIR}/i18n.sh"
 load_messages
-
-if [[ -z "${NEWT_COLORS:-}" ]]; then
-  export NEWT_COLORS="${MCSERVER_KIT_TUI_COLORS:-
-root=white,black
-window=white,black
-border=lightgray,black
-title=lightcyan,black
-textbox=white,black
-listbox=white,black
-actlistbox=white,blue
-actsellistbox=white,blue
-button=black,lightgray
-actbutton=white,blue
-compactbutton=white,black
-entry=white,black
-label=white,black
-checkbox=white,black
-actcheckbox=white,blue
-}"
-fi
+set_default_tui_colors
 
 cleanup() {
   local path
@@ -57,6 +44,22 @@ server_root() {
     configured="${HOME}/${configured#\~/}"
   fi
   printf '%s' "$configured"
+}
+
+refresh_server_listing() {
+  local listing
+  listing="$("${SCRIPT_DIR}/server-manager.sh" list --raw)" || return 1
+  SERVER_LISTING="$listing"
+  SERVER_LISTING_AT=$SECONDS
+  SERVER_LISTING_VALID=true
+}
+
+ensure_server_listing() {
+  # Reuse the home snapshot on an immediate transition to Servers. Refresh
+  # after a few seconds or after any action that might change container state.
+  if [[ "$SERVER_LISTING_VALID" != true ]] || ((SECONDS - SERVER_LISTING_AT >= 3)); then
+    refresh_server_listing
+  fi
 }
 
 tool_availability() {
@@ -88,21 +91,15 @@ LOGO
 }
 
 dashboard_text() {
-  local root="$1" latest=''
-  local total=0 running=0 directory
-  if [[ -d "$root" ]]; then
-    shopt -s nullglob
-    for directory in "$root"/*; do
-      [[ -d "$directory" && -f "${directory}/compose.yaml" ]] || continue
-      total=$((total + 1))
-      if [[ "$("${SCRIPT_DIR}/server-manager.sh" server "$(basename "$directory")" state --raw)" == running ]]; then
-        running=$((running + 1))
-      fi
-    done
-    shopt -u nullglob
-  fi
+  local latest='' id state
+  local total=0 running=0
+  while IFS=$'\t' read -r id state; do
+    [[ -n "$id" ]] || continue
+    total=$((total + 1))
+    [[ "$state" != running ]] || running=$((running + 1))
+  done <<< "$SERVER_LISTING"
   logo
-  latest="$("${SCRIPT_DIR}/update.sh" --cached-quiet 2>/dev/null || true)"
+  latest="$("${SCRIPT_DIR}/update.sh" --cached-only-quiet 2>/dev/null || true)"
   printf '\n%s\n%s\n' "$(tr home.version "$VERSION")" "$(tr home.summary "$total" "$running")"
   [[ -n "$latest" ]] && printf '%s\n' "$(tr home.update_available "$latest")"
   printf '%s\n' "$(tr home.choose)"
@@ -121,8 +118,13 @@ run_and_show() {
   shift
   local output result=0
   new_temp_file output
-  python3 "${SCRIPT_DIR}/tui-progress.py" --output "$output" --title "$title" \
-    --message "$(tr home.processing '{spinner}' "$title")" -- "$@" || result=$?
+  if [[ -n "${MCSERVER_KIT_TUI_SOCKET:-}" ]]; then
+    whiptail --title "$title" --infobox "$(tr home.processing '⠋' "$title")" 8 72
+    "$@" >"$output" 2>&1 || result=$?
+  else
+    python3 "${SCRIPT_DIR}/tui-progress.py" --output "$output" --title "$title" \
+      --message "$(tr home.processing '{spinner}' "$title")" -- "$@" || result=$?
+  fi
   if [[ ! -s "$output" ]]; then
     if ((result == 0)); then
       tr home.completed >"$output"
@@ -139,7 +141,7 @@ run_and_show() {
 }
 
 server_action_menu() {
-  local id="$1" directory="$2" choice output
+  local id="$1" directory="$2" choice output confirmed delete_target
   while true; do
     choice="$(whiptail --title "$id" --menu "$(tr home.server_status "$(server_status "$directory")")" 23 78 13 \
       start "$(tr home.start)" \
@@ -151,17 +153,20 @@ server_action_menu() {
       properties "$(tr home.properties)" \
       open-data "$(tr home.open_data)" \
       open-server "$(tr home.open_server)" \
+      delete "$(tr home.delete_server)" \
       back "$(tr tui.back)" \
-      3>&1 1>&2 2>&3)" || return
+      3>&1 1>&2 2>&3)" || return 0
     case "$choice" in
       start | stop | restart | status)
         run_and_show "$(tr "home.${choice}") · $id" "${SCRIPT_DIR}/server-manager.sh" server "$id" "$choice"
         ;;
       logs)
+        tui_terminal_suspend
         clear
         printf '%s\n\n' "$(tr home.logs_return_hint)"
         "${SCRIPT_DIR}/server-manager.sh" server "$id" logs || true
         pause_for_enter
+        tui_terminal_resume
         ;;
       properties)
         "${SCRIPT_DIR}/server-manager.sh" server "$id" properties || true
@@ -181,30 +186,49 @@ server_action_menu() {
           run_and_show "$(tr home.down) · $id" "${SCRIPT_DIR}/server-manager.sh" server "$id" down
         fi
         ;;
+      delete)
+        delete_target="$(realpath -e -- "$directory")" || {
+          whiptail --title "$(tr common.error)" --msgbox "$(tr server.delete_unsafe "$directory")" 9 76
+          continue
+        }
+        if ! whiptail --title "$(tr home.delete_server)" \
+          --yesno "$(tr server.delete_summary "$id" "$delete_target")" 16 82; then
+          continue
+        fi
+        confirmed="$(whiptail --title "$(tr home.delete_server)" \
+          --inputbox "$(tr server.delete_id_prompt "$id")" 10 76 '' 3>&1 1>&2 2>&3)" || continue
+        if [[ "$confirmed" != "$id" ]]; then
+          whiptail --title "$(tr common.error)" --msgbox "$(tr server.delete_id_mismatch)" 9 72
+          continue
+        fi
+        run_and_show "$(tr home.delete_server) · $id" env \
+          MCSERVER_KIT_DELETE_CONFIRMED_ID="$id" \
+          "${SCRIPT_DIR}/server-manager.sh" server "$id" delete
+        if ((RUN_RESULT == 0)); then
+          return
+        fi
+        ;;
       back) return ;;
     esac
   done
 }
 
 servers_menu() {
-  local root directory id selected
+  local root id state selected
   local items=()
   root="$(server_root)"
   while true; do
     items=()
-    if [[ -d "$root" ]]; then
-      shopt -s nullglob
-      for directory in "$root"/*; do
-        [[ -d "$directory" && -f "${directory}/compose.yaml" ]] || continue
-        id="$(basename "$directory")"
-        items+=("$id" "$(server_status "$directory")")
-      done
-      shopt -u nullglob
-    fi
+    ensure_server_listing || return 0
+    while IFS=$'\t' read -r id state; do
+      [[ -n "$id" ]] || continue
+      items+=("$id" "$(tr "server.state_${state}")")
+    done <<< "$SERVER_LISTING"
     items+=(__back "$(tr tui.back)")
-    selected="$(whiptail --title "$(tr home.servers)" --menu "$(tr home.select_server)" 23 82 15 "${items[@]}" 3>&1 1>&2 2>&3)" || return
+    selected="$(whiptail --title "$(tr home.servers)" --menu "$(tr home.select_server)" 23 82 15 "${items[@]}" 3>&1 1>&2 2>&3)" || return 0
     [[ "$selected" == __back ]] && return
     server_action_menu "$selected" "${root}/${selected}"
+    SERVER_LISTING_VALID=false
   done
 }
 
@@ -214,7 +238,7 @@ language_menu() {
   selected="$(whiptail --title "$(tr home.language)" --radiolist "$(tr home.language_choose)" 13 66 2 \
     en English "$([[ "$current" == en ]] && printf ON || printf OFF)" \
     ja '日本語' "$([[ "$current" == ja ]] && printf ON || printf OFF)" \
-    3>&1 1>&2 2>&3)" || return
+    3>&1 1>&2 2>&3)" || return 0
   "${SCRIPT_DIR}/lang.sh" "--${selected}" >/dev/null
   I18N_MESSAGES=()
   load_messages "$selected"
@@ -241,7 +265,7 @@ diagnostics() {
 }
 
 main() {
-  local root choice installed_version latest
+  local choice installed_version latest
   command -v whiptail >/dev/null 2>&1 || {
     tr tui.missing >&2
     exit 1
@@ -250,9 +274,13 @@ main() {
     printf '%s\n' "$(tr home.tty_required)" >&2
     exit 2
   }
-  root="$(server_root)"
+  # Refresh the cached release once in the background. Home uses only the
+  # existing cache; the result appears on the next menu redraw.
+  "${SCRIPT_DIR}/update.sh" --cached-quiet >/dev/null 2>&1 &
+
   while true; do
-    choice="$(whiptail --backtitle "mcserver-kit ${VERSION}" --title 'Minecraft Server Kit' --menu "$(dashboard_text "$root")" 28 94 10 \
+    ensure_server_listing 2>/dev/null || true
+    choice="$(whiptail --backtitle "mcserver-kit ${VERSION}" --title 'Minecraft Server Kit' --menu "$(dashboard_text)" 28 94 10 \
       servers "$(tr home.servers)" \
       create "$(tr home.create)" \
       config "$(tr home.config)" \
@@ -262,13 +290,16 @@ main() {
       update "$(tr home.update)" \
       help "$(tr home.help)" \
       exit "$(tr home.exit)" \
-      3>&1 1>&2 2>&3)" || return
+      3>&1 1>&2 2>&3)" || return 0
     case "$choice" in
       servers) servers_menu ;;
       create)
+        tui_terminal_suspend
         clear
         "${SCRIPT_DIR}/create-server.sh" || true
         pause_for_enter
+        tui_terminal_resume
+        SERVER_LISTING_VALID=false
         ;;
       config) "${SCRIPT_DIR}/config-tui.sh" || true ;;
       templates) "${SCRIPT_DIR}/config-tui.sh" templates || true ;;

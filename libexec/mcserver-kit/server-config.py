@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
-"""Manage per-server itzg environment settings and migrate generated Compose files."""
+"""Manage container settings and Minecraft server.properties files."""
 
 from __future__ import annotations
 
 import json
 import os
 import re
+import secrets
 import shutil
 import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import versioned_settings
 
 MANAGED_DEFAULTS = {
     "MOTD": "A Minecraft Server",
@@ -86,15 +90,84 @@ def decode(value: str) -> str:
     return value
 
 
-def read_env(path: Path) -> dict[str, str]:
+def parse_env(contents: str) -> dict[str, str]:
     values: dict[str, str] = {}
-    if not path.is_file():
-        return values
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in contents.splitlines():
         match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", line)
         if match:
             values[match.group(1)] = decode(match.group(2))
     return values
+
+
+def read_env(path: Path) -> dict[str, str]:
+    return parse_env(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+
+def initialize_properties(server_dir: Path, contents: str) -> None:
+    """Split creation answers into Minecraft properties and container settings."""
+    properties = server_dir / "data" / "server.properties"
+    environment = server_dir / "server.env"
+    if properties.exists() or environment.exists():
+        raise ValueError("Refusing to overwrite existing server settings")
+    values = parse_env(contents)
+    entries = {
+        PROPERTY_KEYS[key]: value for key, value in values.items() if key in PROPERTY_KEYS
+    }
+    entries.update({
+        "level-name": "world", "server-port": "25565",
+        "enable-rcon": "true", "rcon.port": "25575",
+        "rcon.password": secrets.token_hex(24),
+    })
+    retained = {key: value for key, value in values.items() if key not in PROPERTY_KEYS}
+    versioned_settings.prepare_initial(read_env(server_dir / ".env").get("MC_VERSION", ""), entries, retained)
+    rendered = "#Minecraft server properties\n" + "".join(
+        f"{key}={escape_property_value(value)}\n" for key, value in entries.items()
+    )
+    retained["OVERRIDE_SERVER_PROPERTIES"] = "false"
+    retained.update(rcon_environment(entries))
+    properties.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(properties, rendered, 0o644)
+    write_env(environment, retained)
+
+
+def rcon_environment(properties: dict[str, str]) -> dict[str, str]:
+    """Derived client settings: Minecraft properties remain authoritative."""
+    return {
+        "ENABLE_RCON": properties.get("enable-rcon", "false"),
+        "RCON_PORT": properties.get("rcon.port", "25575"),
+        "RCON_PASSWORD": properties.get("rcon.password", ""),
+    }
+
+
+def sync_rcon_environment(properties_path: Path) -> None:
+    environment = properties_path.parent.parent / "server.env"
+    values = read_env(environment)
+    if values.get("OVERRIDE_SERVER_PROPERTIES", "true").lower() == "false":
+        values.update(rcon_environment(parse_import_properties(properties_path)))
+        write_env(environment, values)
+
+
+def replace_authoritative_properties(
+    server_dir: Path, prepared: Path, environment_overrides: dict[str, str] | None = None
+) -> None:
+    """Commit prepared properties and their derived RCON client settings together."""
+    destination = server_dir / "data" / "server.properties"
+    environment = server_dir / "server.env"
+    values = read_env(environment)
+    values.update(environment_overrides or {})
+    if values.get("OVERRIDE_SERVER_PROPERTIES", "true").lower() != "false":
+        raise ValueError("Migrate to data/server.properties before replacing it")
+    values.update(rcon_environment(parse_import_properties(prepared)))
+    previous_env = environment.read_bytes() if environment.is_file() else None
+    write_env(environment, values)
+    try:
+        os.replace(prepared, destination)
+    except Exception:
+        if previous_env is None:
+            environment.unlink(missing_ok=True)
+        else:
+            atomic_write(environment, previous_env.decode("utf-8"), 0o600)
+        raise
 
 
 def write_env(path: Path, values: dict[str, str]) -> None:
@@ -105,41 +178,170 @@ def write_env(path: Path, values: dict[str, str]) -> None:
     atomic_write(path, contents, 0o600)
 
 
-def read_properties(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    if not path.is_file():
-        return values
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line or line.startswith(("#", "!")) or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        values[key.strip()] = value
-    return values
+
+def validate_property_key(key: str) -> None:
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", key):
+        raise ValueError(f"Unsupported property key: {key}")
 
 
-def set_property(path: Path, env_key: str, value: str) -> None:
-    property_key = PROPERTY_KEYS[env_key]
+def property_line_key(line: str) -> str | None:
+    stripped = line.lstrip(" \t\f")
+    if not stripped or stripped.startswith(("#", "!")):
+        return None
+    separator = 0
+    while separator < len(stripped):
+        if stripped[separator] == "\\":
+            separator += 2
+        elif stripped[separator] in "=: \t\f\r\n":
+            break
+        else:
+            separator += 1
+    try:
+        return unescape_import_property(stripped[:separator], 0)
+    except ValueError:
+        return None
+
+
+def property_spans(lines: list[str]) -> list[tuple[int, int, str]]:
+    spans: list[tuple[int, int, str]] = []
+    index = 0
+    while index < len(lines):
+        start = index
+        logical = lines[index].rstrip("\r\n")
+        while (len(logical) - len(logical.rstrip("\\"))) % 2 and index + 1 < len(lines):
+            logical = logical[:-1] + lines[index + 1].lstrip(" \t\f").rstrip("\r\n")
+            index += 1
+        key = property_line_key(logical)
+        if key is not None:
+            spans.append((start, index + 1, key))
+        index += 1
+    return spans
+
+
+def escape_property_value(value: str) -> str:
+    if "\n" in value or "\r" in value:
+        raise ValueError("Property values cannot contain newlines")
+    value = value.replace("\\", "\\\\").replace("\t", "\\t").replace("\f", "\\f")
+    if value.startswith(" "):
+        value = "\\" + value
+    return value
+
+
+def set_property_key(path: Path, property_key: str, value: str) -> None:
+    validate_property_key(property_key)
+    if property_key == "server-port" and value != "25565":
+        raise ValueError("server-port must be 25565 for this server layout")
+    if property_key == "level-name" and value != "world":
+        raise ValueError("level-name must be world for this server layout")
     if "\n" in value or "\r" in value:
         raise ValueError("Property values cannot contain newlines")
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-    replacement = f"{property_key}={value}\n"
-    indices = [
-        index for index, line in enumerate(lines)
-        if line.partition("=")[0].strip() == property_key
-    ]
-    if indices:
-        lines[indices[-1]] = replacement
+    replacement = f"{property_key}={escape_property_value(value)}\n"
+    spans = [span for span in property_spans(lines) if span[2] == property_key]
+    if spans:
+        start, end, _ = spans[-1]
+        lines[start:end] = [replacement]
     else:
         if lines and not lines[-1].endswith("\n"):
             lines[-1] += "\n"
         lines.append(replacement)
     atomic_write(path, "".join(lines))
+    if path.name == "server.properties":
+        sync_rcon_environment(path)
 
 
-def validate_properties_source(source: Path) -> None:
+def remove_property_key(path: Path, property_key: str) -> bool:
+    validate_property_key(property_key)
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    spans = [span for span in property_spans(lines) if span[2] == property_key]
+    if not spans:
+        return False
+    for start, end, _ in reversed(spans):
+        del lines[start:end]
+    atomic_write(path, "".join(lines))
+    if path.name == "server.properties":
+        sync_rcon_environment(path)
+    return True
+
+
+def backup_directory(server_dir: Path) -> Path:
+    return server_dir / "backups" / "server-properties"
+
+
+def create_properties_backup(server_dir: Path, reason: str = "manual") -> Path:
+    source = server_dir / "data" / "server.properties"
+    if not source.is_file():
+        raise ValueError("server.properties does not exist")
+    destination_dir = backup_directory(server_dir)
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    destination = destination_dir / f"{stamp}-{reason}.properties"
+    shutil.copy2(source, destination)
+    destination.chmod(0o600)
+    rules = versioned_settings.startup_values(
+        read_env(server_dir / "server.env").get("RCON_CMDS_STARTUP", "")
+    )
+    atomic_write(
+        destination.with_suffix(".properties.rules.json"),
+        json.dumps(rules, sort_keys=True) + "\n", 0o600
+    )
+    return destination
+
+
+def list_properties_backups(server_dir: Path) -> list[Path]:
+    directory = backup_directory(server_dir)
+    if not directory.is_dir():
+        return []
+    return sorted(directory.glob("*.properties"), reverse=True)
+
+
+def resolve_properties_backup(server_dir: Path, backup_id: str) -> Path:
+    if Path(backup_id).name != backup_id or not re.fullmatch(r"[A-Za-z0-9_.-]+", backup_id):
+        raise ValueError("Invalid backup ID")
+    candidate = backup_directory(server_dir) / backup_id
+    if not candidate.is_file() or candidate.is_symlink():
+        raise ValueError(f"Backup not found: {backup_id}")
+    return candidate
+
+
+def restore_properties_backup(server_dir: Path, backup_id: str) -> Path:
+    source = resolve_properties_backup(server_dir, backup_id)
+    validate_properties_source(source, require_name=False)
+    destination = server_dir / "data" / "server.properties"
+    environment = read_env(server_dir / "server.env")
+    rules_path = source.with_suffix(".properties.rules.json")
+    if rules_path.is_symlink():
+        raise ValueError("Game rule backup must not be a symlink")
+    if rules_path.is_file():
+        saved_rules = json.loads(rules_path.read_text(encoding="utf-8"))
+        if not isinstance(saved_rules, dict) or any(
+            key not in versioned_settings.MOVED_RULES or value not in ("true", "false")
+            for key, value in saved_rules.items()
+        ):
+            raise ValueError("Invalid game rule backup")
+        version = read_env(server_dir / ".env").get("MC_VERSION", "")
+        environment["RCON_CMDS_STARTUP"] = versioned_settings.update_startup(
+            environment.get("RCON_CMDS_STARTUP", ""),
+            {key: saved_rules.get(key) for key in versioned_settings.MOVED_RULES}, version
+        )
+    descriptor, temporary_name = tempfile.mkstemp(prefix="server.properties.", dir=destination.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as output, source.open("rb") as input_file:
+            shutil.copyfileobj(input_file, output)
+        prepare_versioned_file(server_dir, Path(temporary_name), environment)
+        os.chmod(temporary_name, 0o644)
+        previous = create_properties_backup(server_dir, "before-restore")
+        replace_authoritative_properties(server_dir, Path(temporary_name), environment)
+    finally:
+        if os.path.exists(temporary_name):
+            os.unlink(temporary_name)
+    return previous
+
+
+def validate_properties_source(source: Path, require_name: bool = True) -> None:
     if not source.is_file():
         raise ValueError(f"Not a file: {source}")
-    if source.name != "server.properties":
+    if require_name and source.name != "server.properties":
         raise ValueError("Select a file named server.properties")
     if not parse_import_properties(source):
         raise ValueError("The selected file has no property entries")
@@ -217,41 +419,56 @@ def parse_import_properties(source: Path) -> dict[str, str]:
     return values
 
 
+def prepare_versioned_file(server_dir: Path, prepared: Path, environment: dict[str, str]) -> None:
+    original = parse_import_properties(prepared)
+    current = original.copy()
+    version = read_env(server_dir / ".env").get("MC_VERSION", "")
+    # Distributed properties often omit RCON. Preserve the toolkit's existing
+    # internal RCON configuration only when it was already enabled.
+    moved = any(
+        versioned_settings.mode(version, key) in ("camel", "namespaced")
+        and names[0] in original
+        for key, names in versioned_settings.MOVED_RULES.items()
+    )
+    if moved:
+        existing = parse_import_properties(server_dir / "data/server.properties")
+        if existing.get("enable-rcon", "false").lower() == "true":
+            if "enable-rcon" not in original:
+                current["enable-rcon"] = "true"
+            if current.get("enable-rcon", "false").lower() == "true":
+                for key in ("rcon.port", "rcon.password"):
+                    if key not in original and key in existing:
+                        current[key] = existing[key]
+    versioned_settings.prepare_initial(version, current, environment)
+    for key in set(original) - set(current):
+        remove_property_key(prepared, key)
+    for key, value in current.items():
+        if original.get(key) != value:
+            set_property_key(prepared, key, value)
+
+
 def import_properties(server_dir: Path, source: Path) -> Path | None:
     validate_properties_source(source)
-    imported = parse_import_properties(source)
     env_path = server_dir / "server.env"
     values = read_env(env_path)
-    for env_key, property_key in PROPERTY_KEYS.items():
-        if property_key in imported:
-            values[env_key] = imported[property_key]
-    # create-server.sh stores the selected save at data/world; Compose sets LEVEL=world.
-    known = set(PROPERTY_KEYS.values()) | {"level-name", "server-port"}
-    extras = [f"{key}={value}" for key, value in imported.items() if key not in known]
-    values["CUSTOM_SERVER_PROPERTIES"] = "\n".join(extras)
-    values["OVERRIDE_SERVER_PROPERTIES"] = "true"
-
+    if values.get("OVERRIDE_SERVER_PROPERTIES", "true").lower() != "false":
+        raise ValueError("Migrate to data/server.properties before importing")
     destination = server_dir / "data" / "server.properties"
     destination.parent.mkdir(parents=True, exist_ok=True)
     if source.resolve() == destination.resolve():
         raise ValueError("The source is already this server's server.properties")
-    backup = None
-    if destination.exists():
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        backup = destination.with_name(f"server.properties.mcserver-kit.{stamp}.bak")
-        suffix = 1
-        while backup.exists():
-            backup = destination.with_name(f"server.properties.mcserver-kit.{stamp}.{suffix}.bak")
-            suffix += 1
-        shutil.copy2(destination, backup)
 
     descriptor, temporary_name = tempfile.mkstemp(prefix="server.properties.", dir=destination.parent)
     try:
         with os.fdopen(descriptor, "wb") as output, source.open("rb") as input_file:
             shutil.copyfileobj(input_file, output)
+        # The managed world is always mounted at data/world.
+        set_property_key(Path(temporary_name), "level-name", "world")
+        set_property_key(Path(temporary_name), "server-port", "25565")
+        prepare_versioned_file(server_dir, Path(temporary_name), values)
         os.chmod(temporary_name, 0o644)
-        write_env(env_path, values)
-        os.replace(temporary_name, destination)
+        backup = create_properties_backup(server_dir, "before-import") if destination.exists() else None
+        replace_authoritative_properties(server_dir, Path(temporary_name), values)
     finally:
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
@@ -295,7 +512,14 @@ def atomic_write(path: Path, contents: str, mode: int | None = None) -> None:
 
 def migrate_compose(path: Path) -> None:
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-    managed = set(MANAGED_DEFAULTS)
+    managed = set(MANAGED_DEFAULTS) | set(PROPERTY_KEYS) | {
+        "CUSTOM_SERVER_PROPERTIES",
+        "OVERRIDE_SERVER_PROPERTIES",
+        "LEVEL",
+        "ENABLE_RCON",
+        "RCON_PORT",
+        "RCON_PASSWORD",
+    }
     output: list[str] = []
     in_minecraft = False
     env_file_found = False
@@ -328,41 +552,137 @@ def migrate_compose(path: Path) -> None:
     atomic_write(path, "".join(output))
 
 
-def migrate(server_dir: Path) -> None:
+def migration_backup_directory(server_dir: Path) -> Path:
+    root = server_dir / "backups" / "source-migrations"
+    root.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    destination = root / stamp
+    destination.mkdir(mode=0o700)
+    return destination
+
+
+def migrate_to_properties(server_dir: Path) -> Path:
     compose = server_dir / "compose.yaml"
-    target = server_dir / "server.env"
+    properties_path = server_dir / "data" / "server.properties"
+    env_path = server_dir / "server.env"
+    if not compose.is_file():
+        raise ValueError("compose.yaml does not exist")
+
     dotenv = read_env(server_dir / ".env")
-    existing = read_env(target)
     compose_values = compose_environment(compose, dotenv)
-    properties = read_properties(server_dir / "data" / "server.properties")
-    backup = server_dir / "compose.yaml.mcserver-kit.bak"
-    if not target.exists() and not backup.exists():
-        shutil.copy2(compose, backup)
-    values: dict[str, str] = dict(existing)
-    for env_key, default in MANAGED_DEFAULTS.items():
-        property_key = PROPERTY_KEYS.get(env_key, "")
-        values[env_key] = existing.get(
-            env_key,
-            compose_values.get(env_key, properties.get(property_key, default)),
-        )
-    values["MOTD"] = existing.get("MOTD", dotenv.get("MC_MOTD", values["MOTD"]))
-    values["WHITELIST"] = existing.get("WHITELIST", dotenv.get("MC_WHITELIST", values["WHITELIST"]))
-    values["OPS"] = existing.get("OPS", dotenv.get("MC_OPS", values["OPS"]))
-    if "ENABLE_WHITELIST" not in existing and "ENABLE_WHITELIST" not in compose_values:
-        if values["WHITELIST"] or "WHITELIST" in compose_values:
-            values["ENABLE_WHITELIST"] = "true"
-    write_env(target, values)
-    migrate_compose(compose)
+    env_values = read_env(env_path)
+    if properties_path.is_file():
+        # Parse before changing anything so malformed files fail transactionally.
+        parse_import_properties(properties_path)
+
+    custom = env_values.get("CUSTOM_SERVER_PROPERTIES", "")
+    custom_values: list[tuple[str, str]] = []
+    for number, line in enumerate(custom.splitlines(), 1):
+        if not line.strip():
+            continue
+        if "=" not in line:
+            raise ValueError(f"Invalid CUSTOM_SERVER_PROPERTIES line {number}")
+        key, value = line.split("=", 1)
+        validate_property_key(key.strip())
+        custom_values.append((key.strip(), value))
+
+    backup = migration_backup_directory(server_dir)
+    for source in (compose, env_path, properties_path):
+        if source.is_file():
+            shutil.copy2(source, backup / source.name)
+
+    retained = {
+        key: value
+        for key, value in env_values.items()
+        if key not in PROPERTY_KEYS and key not in ("CUSTOM_SERVER_PROPERTIES", "LEVEL")
+    }
+    for key in ("WHITELIST", "EXISTING_WHITELIST_FILE", "OPS", "EXISTING_OPS_FILE"):
+        if key in compose_values and key not in retained:
+            retained[key] = compose_values[key]
+    for key, old_key in (("WHITELIST", "MC_WHITELIST"), ("OPS", "MC_OPS")):
+        if key not in retained and old_key in dotenv:
+            retained[key] = dotenv[old_key]
+    retained["OVERRIDE_SERVER_PROPERTIES"] = "false"
+
+    properties_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix="server.properties.", dir=properties_path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            if properties_path.is_file():
+                with properties_path.open("rb") as input_file:
+                    shutil.copyfileobj(input_file, output)
+            else:
+                output.write(b"#Minecraft server properties\n")
+        for key, value in custom_values:
+            set_property_key(temporary, key, value)
+        for env_key, property_key in PROPERTY_KEYS.items():
+            value = env_values.get(env_key, compose_values.get(env_key))
+            if env_key == "ENABLE_WHITELIST" and value is None and retained.get("WHITELIST"):
+                value = "true"
+            if env_key == "MOTD":
+                value = env_values.get(env_key, dotenv.get("MC_MOTD", value))
+            if value is not None:
+                set_property_key(temporary, property_key, value)
+        for env_key, property_key in (
+            ("ENABLE_RCON", "enable-rcon"),
+            ("RCON_PORT", "rcon.port"),
+            ("RCON_PASSWORD", "rcon.password"),
+        ):
+            value = env_values.get(env_key, compose_values.get(env_key))
+            if value is not None:
+                set_property_key(temporary, property_key, value)
+        # mcserver-kit stores imported worlds at data/world.
+        set_property_key(temporary, "level-name", "world")
+        set_property_key(temporary, "server-port", "25565")
+        temporary.chmod(0o644)
+        settings = parse_import_properties(temporary)
+        versioned_settings.prepare_initial(dotenv.get("MC_VERSION", ""), settings, retained)
+        for key in set(parse_import_properties(temporary)) - set(settings):
+            remove_property_key(temporary, key)
+        retained.update(rcon_environment(parse_import_properties(temporary)))
+
+        try:
+            write_env(env_path, retained)
+            migrate_compose(compose)
+            os.replace(temporary, properties_path)
+        except Exception:
+            for original in (compose, env_path):
+                saved = backup / original.name
+                if saved.is_file():
+                    shutil.copy2(saved, original)
+                elif original.exists():
+                    original.unlink()
+            raise
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    return backup
 
 
 def main() -> int:
     if len(sys.argv) < 3:
-        print("usage: server-config.py get|set|migrate|property-get|property-set|import-properties TARGET [KEY] [VALUE]", file=sys.stderr)
+        print("usage: server-config.py OPERATION TARGET [ARG...]", file=sys.stderr)
         return 2
     operation = sys.argv[1]
     target = Path(sys.argv[2])
-    if operation == "migrate" and len(sys.argv) == 3:
-        migrate(target)
+    if operation == "initialize-properties" and len(sys.argv) == 3:
+        try:
+            initialize_properties(target, sys.stdin.read())
+        except (OSError, ValueError, UnicodeError) as error:
+            print(f"Could not initialize server properties: {error}", file=sys.stderr)
+            return 1
+        return 0
+    if operation == "migrate-to-properties" and len(sys.argv) == 3:
+        try:
+            print(migrate_to_properties(target))
+        except (OSError, ValueError, UnicodeError) as error:
+            print(f"Migration failed: {error}", file=sys.stderr)
+            return 1
+        return 0
+    if operation == "source-mode" and len(sys.argv) == 3:
+        override = read_env(target / "server.env").get("OVERRIDE_SERVER_PROPERTIES", "true")
+        print("properties" if override.lower() == "false" else "environment")
         return 0
     if operation == "validate-properties" and len(sys.argv) == 3:
         try:
@@ -385,15 +705,60 @@ def main() -> int:
         if key is None:
             return 2
         default = sys.argv[4] if len(sys.argv) == 5 else ""
-        print(read_properties(target).get(key, default))
+        print(parse_import_properties(target).get(key, default))
         return 0
-    if operation == "property-set" and len(sys.argv) == 5:
-        if sys.argv[3] not in PROPERTY_KEYS:
+    if operation == "property-key" and len(sys.argv) == 3:
+        key = PROPERTY_KEYS.get(str(target))
+        if key is None:
             return 2
+        print(key)
+        return 0
+    if operation == "property-list" and len(sys.argv) == 3:
         try:
-            set_property(target, sys.argv[3], sys.argv[4])
+            for key, value in parse_import_properties(target).items():
+                print(f"{key}={value}")
+        except (OSError, ValueError, UnicodeError) as error:
+            print(f"Could not read server.properties: {error}", file=sys.stderr)
+            return 1
+        return 0
+    if operation == "property-key-get" and len(sys.argv) in (4, 5):
+        try:
+            validate_property_key(sys.argv[3])
+            default = sys.argv[4] if len(sys.argv) == 5 else ""
+            print(parse_import_properties(target).get(sys.argv[3], default))
+        except (OSError, ValueError, UnicodeError) as error:
+            print(f"Could not read server.properties: {error}", file=sys.stderr)
+            return 1
+        return 0
+    if operation == "property-key-set" and len(sys.argv) == 5:
+        try:
+            set_property_key(target, sys.argv[3], sys.argv[4])
         except (OSError, ValueError, UnicodeError) as error:
             print(f"Could not edit server.properties: {error}", file=sys.stderr)
+            return 1
+        return 0
+    if operation == "property-key-remove" and len(sys.argv) == 4:
+        try:
+            return 0 if remove_property_key(target, sys.argv[3]) else 3
+        except (OSError, ValueError, UnicodeError) as error:
+            print(f"Could not edit server.properties: {error}", file=sys.stderr)
+            return 1
+    if operation == "property-backup" and len(sys.argv) == 3:
+        try:
+            print(create_properties_backup(target))
+        except (OSError, ValueError) as error:
+            print(f"Backup failed: {error}", file=sys.stderr)
+            return 1
+        return 0
+    if operation == "property-backups" and len(sys.argv) == 3:
+        for backup in list_properties_backups(target):
+            print(backup.name)
+        return 0
+    if operation == "property-restore" and len(sys.argv) == 4:
+        try:
+            print(restore_properties_backup(target, sys.argv[3]))
+        except (OSError, ValueError, UnicodeError) as error:
+            print(f"Restore failed: {error}", file=sys.stderr)
             return 1
         return 0
     if operation == "get" and len(sys.argv) in (4, 5):
