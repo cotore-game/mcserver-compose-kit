@@ -618,8 +618,7 @@ chmod 600 "${target}/.env"
   printf 'RESOURCE_PACK_SHA1=%s\n' "$(escape_env_value "$resource_pack_sha1")"
   printf 'RESOURCE_PACK_ID=%s\n' "$(escape_env_value "$resource_pack_id")"
   printf 'RESOURCE_PACK_ENFORCE=%s\n' "$(escape_env_value "$resource_pack_enforce")"
-} >"${target}/server.env"
-chmod 600 "${target}/server.env"
+} | python3 "${SCRIPT_DIR}/server-config.py" initialize-properties "$target"
 
 cat >"${target}/compose.yaml" <<COMPOSE
 services:
@@ -642,7 +641,6 @@ services:
       MEMORY: "\${MC_MEMORY}"
       TZ: "${timezone}"
 
-      LEVEL: "world"
 COMPOSE
 
 cat >>"${target}/compose.yaml" <<COMPOSE

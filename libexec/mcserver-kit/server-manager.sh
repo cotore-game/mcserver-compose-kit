@@ -52,12 +52,38 @@ resolve_server_dir() {
   printf '%s' "${root}/${id}"
 }
 
-list_servers() {
-  local root
-  local directory
-  local found=false
+resolve_deletion_target() {
+  local id="$1" root root_real candidate candidate_real parent_real
+  validate_server_id "$id"
   root="$(server_root)"
-  printf '%-28s %s\n' "$(tr server.list_id)" "$(tr server.list_status)"
+  [[ -d "$root" ]] || die "$(tr server.delete_unsafe "$root")"
+  root_real="$(realpath -e -- "$root")" || die "$(tr server.delete_unsafe "$root")"
+  [[ "$root_real" != / && "$root_real" != "$HOME" ]] || die "$(tr server.delete_unsafe "$root_real")"
+
+  candidate="${root_real}/${id}"
+  [[ -d "$candidate" && ! -L "$candidate" ]] || die "$(tr server.delete_unsafe "$candidate")"
+  candidate_real="$(realpath -e -- "$candidate")" || die "$(tr server.delete_unsafe "$candidate")"
+  parent_real="$(dirname -- "$candidate_real")"
+  [[ "$parent_real" == "$root_real" && "$candidate_real" == "${root_real}/${id}" ]] ||
+    die "$(tr server.delete_unsafe "$candidate_real")"
+  [[ -f "${candidate_real}/compose.yaml" && ! -L "${candidate_real}/compose.yaml" ]] ||
+    die "$(tr server.delete_unsafe "$candidate_real")"
+  printf '%s' "$candidate_real"
+}
+
+list_servers() {
+  local root directory id state
+  local found=false
+  local raw=false
+  case "${1-}" in
+    '') ;;
+    --raw) raw=true ;;
+    *) die "$(tr server.manager_usage)" ;;
+  esac
+  root="$(server_root)"
+  if [[ "$raw" != true ]]; then
+    printf '%-28s %s\n' "$(tr server.list_id)" "$(tr server.list_status)"
+  fi
   if [[ ! -d "$root" ]]; then
     return
   fi
@@ -65,11 +91,18 @@ list_servers() {
   for directory in "$root"/*; do
     [[ -d "$directory" && -f "${directory}/compose.yaml" ]] || continue
     found=true
-    printf '%-28s ' "$(basename "$directory")"
-    server_state "$directory"
+    id="$(basename "$directory")"
+    state="$(container_state "$directory")"
+    if [[ "$raw" == true ]]; then
+      printf '%s\t%s\n' "$id" "$state"
+    else
+      printf '%-28s %s\n' "$id" "$(tr "server.state_${state}")"
+    fi
   done
   shopt -u nullglob
-  [[ "$found" == true ]] || printf '%s\n' "$(tr server.none)"
+  if [[ "$found" != true && "$raw" != true ]]; then
+    printf '%s\n' "$(tr server.none)"
+  fi
 }
 
 compose_in() {
@@ -125,18 +158,24 @@ choose_properties_file() {
 }
 
 import_properties() {
-  local directory="$1" source="${2-}" backup
+  local directory="$1" source="${2-}" backup mode migration_backup
   require_stopped "$directory"
   if [[ -z "$source" ]]; then
     source="$(choose_properties_file)" || return 0
   fi
   [[ -f "$source" ]] || die "$(tr server.import_source_missing "$source")"
   python3 "$CONFIG_TOOL" validate-properties "$source" || die "$(tr server.import_failed)"
-  python3 "$CONFIG_TOOL" migrate "$directory" || die "$(tr server.import_failed)"
+  mode="$(python3 "$CONFIG_TOOL" source-mode "$directory")" ||
+    die "$(tr properties.source_check_failed)"
+  if [[ "$mode" != properties ]]; then
+    migration_backup="$(python3 "$CONFIG_TOOL" migrate-to-properties "$directory")" ||
+      die "$(tr properties.migration_failed)"
+    printf '%s\n' "$(tr properties.migration_done "$migration_backup")"
+  fi
   backup="$(python3 "$CONFIG_TOOL" import-properties "$directory" "$source")" || die "$(tr server.import_failed)"
   compose_in "$directory" config --quiet || die "$(tr properties.compose_invalid)"
   [[ -z "$backup" ]] || printf '%s\n' "$(tr server.import_backup "$backup")"
-  printf '%s\n' "$(tr server.import_done "${directory}/server.env")"
+  printf '%s\n' "$(tr server.import_done_properties "${directory}/data/server.properties")"
 }
 
 open_folder() {
@@ -163,12 +202,132 @@ open_folder() {
   die "$(tr server.explorer_unavailable)"
 }
 
+require_properties_source() {
+  local directory="$1" mode
+  mode="$(python3 "$CONFIG_TOOL" source-mode "$directory")" || die "$(tr properties.source_check_failed)"
+  [[ "$mode" == properties ]] || die "$(tr properties.migrate_first)"
+}
+
+manage_properties() {
+  local id="$1" directory="$2" command="${3-}" properties backup mode
+  properties="${directory}/data/server.properties"
+  case "$command" in
+    '') exec "${SCRIPT_DIR}/server-properties-tui.sh" "$id" "$directory" ;;
+    migrate)
+      [[ $# -eq 3 ]] || die "$(tr properties.cli_usage)"
+      mode="$(python3 "$CONFIG_TOOL" source-mode "$directory")" ||
+        die "$(tr properties.source_check_failed)"
+      if [[ "$mode" == properties ]]; then
+        printf '%s\n' "$(tr properties.already_managed)"
+        return 0
+      fi
+      require_stopped "$directory"
+      backup="$(python3 "$CONFIG_TOOL" migrate-to-properties "$directory")" ||
+        die "$(tr properties.migration_failed)"
+      compose_in "$directory" config --quiet || die "$(tr properties.compose_invalid)"
+      printf '%s\n' "$(tr properties.migration_done "$backup")"
+      ;;
+    list)
+      [[ $# -eq 3 ]] || die "$(tr properties.cli_usage)"
+      require_properties_source "$directory"
+      python3 "$CONFIG_TOOL" property-list "$properties"
+      ;;
+    get)
+      [[ $# -eq 4 ]] || die "$(tr properties.cli_usage)"
+      require_properties_source "$directory"
+      python3 "$CONFIG_TOOL" property-key-get "$properties" "$4"
+      ;;
+    set | add)
+      [[ $# -eq 5 ]] || die "$(tr properties.cli_usage)"
+      require_properties_source "$directory"
+      require_stopped "$directory"
+      python3 "$CONFIG_TOOL" property-backup "$directory" >/dev/null
+      python3 "$CONFIG_TOOL" property-key-set "$properties" "$4" "$5"
+      printf '%s\n' "$(tr properties.cli_saved "$4")"
+      ;;
+    remove)
+      [[ $# -eq 4 ]] || die "$(tr properties.cli_usage)"
+      require_properties_source "$directory"
+      require_stopped "$directory"
+      python3 "$CONFIG_TOOL" property-backup "$directory" >/dev/null
+      if python3 "$CONFIG_TOOL" property-key-remove "$properties" "$4"; then
+        printf '%s\n' "$(tr properties.cli_removed "$4")"
+      else
+        [[ $? -eq 3 ]] && die "$(tr properties.cli_missing_key "$4")"
+        return 1
+      fi
+      ;;
+    import)
+      [[ $# -eq 4 ]] || die "$(tr properties.cli_usage)"
+      require_properties_source "$directory"
+      import_properties "$directory" "$4"
+      ;;
+    backup)
+      [[ $# -eq 3 ]] || die "$(tr properties.cli_usage)"
+      require_properties_source "$directory"
+      require_stopped "$directory"
+      backup="$(python3 "$CONFIG_TOOL" property-backup "$directory")" || die "$(tr properties.backup_failed)"
+      printf '%s\n' "$(tr properties.backup_done "$backup")"
+      ;;
+    backups)
+      [[ $# -eq 3 ]] || die "$(tr properties.cli_usage)"
+      require_properties_source "$directory"
+      python3 "$CONFIG_TOOL" property-backups "$directory"
+      ;;
+    restore)
+      [[ $# -eq 4 ]] || die "$(tr properties.cli_usage)"
+      require_properties_source "$directory"
+      require_stopped "$directory"
+      backup="$(python3 "$CONFIG_TOOL" property-restore "$directory" "$4")" ||
+        die "$(tr properties.restore_failed)"
+      printf '%s\n' "$(tr properties.restore_done "$4" "$backup")"
+      ;;
+    *) die "$(tr properties.cli_usage)" ;;
+  esac
+}
+
+confirm_server_deletion() {
+  local id="$1" directory="$2" answer typed
+  printf '%s\n' "$(tr server.delete_summary "$id" "$directory")"
+  IFS= read -r -p "$(tr server.delete_confirm)" answer || answer=''
+  case "$answer" in
+    y | Y | yes | YES) ;;
+    *) tr server.delete_cancelled; return 1 ;;
+  esac
+  IFS= read -r -p "$(tr server.delete_id_prompt "$id")" typed || typed=''
+  if [[ "$typed" != "$id" ]]; then
+    tr server.delete_id_mismatch
+    return 1
+  fi
+}
+
+delete_server() {
+  local id="$1" directory="$2"
+  if [[ "${MCSERVER_KIT_DELETE_CONFIRMED_ID:-}" != "$id" ]]; then
+    confirm_server_deletion "$id" "$directory" || return 0
+  fi
+
+  # Resolve again immediately before each destructive step. This rejects
+  # symlinks and anything outside the configured server root.
+  directory="$(resolve_deletion_target "$id")"
+  printf '%s\n' "$(tr server.delete_down "$id")"
+  compose_in "$directory" down || die "$(tr server.delete_down_failed)"
+  directory="$(resolve_deletion_target "$id")"
+  rm -rf -- "$directory" || die "$(tr server.delete_failed "$directory")"
+  [[ ! -e "$directory" ]] || die "$(tr server.delete_failed "$directory")"
+  printf '%s\n' "$(tr server.delete_done "$id" "$directory")"
+}
+
 manage_server() {
   local id="${1-}"
   local action="${2-}"
   local directory
   [[ -n "$id" && -n "$action" ]] || die "$(tr server.usage)"
-  directory="$(resolve_server_dir "$id")"
+  if [[ "$action" == delete ]]; then
+    directory="$(resolve_deletion_target "$id")"
+  else
+    directory="$(resolve_server_dir "$id")"
+  fi
   shift 2
 
   case "$action" in
@@ -228,8 +387,12 @@ manage_server() {
       printf '%s\n' "$(tr server.down "$id")"
       compose_in "$directory" down
       ;;
+    delete)
+      [[ $# -eq 0 ]] || die "$(tr server.delete_usage)"
+      delete_server "$id" "$directory"
+      ;;
     properties)
-      exec "${SCRIPT_DIR}/server-properties-tui.sh" "$id" "$directory"
+      manage_properties "$id" "$directory" "$@"
       ;;
     import-properties)
       [[ $# -le 1 ]] || die "$(tr server.import_usage)"
@@ -247,7 +410,9 @@ manage_server() {
 
 main() {
   case "${1-}" in
-    list) list_servers ;;
+    list)
+      shift
+      list_servers "$@" ;;
     server)
       shift
       manage_server "$@"

@@ -4,6 +4,9 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -z "${MCSERVER_KIT_TUI_SOCKET:-}" && -t 0 && -t 1 ]]; then
+  exec python3 "${SCRIPT_DIR}/tui-session.py" run bash "${BASH_SOURCE[0]}" "$@"
+fi
 SERVER_ID="${1-}"
 SERVER_DIR="${2-}"
 SERVER_ENV="${SERVER_DIR}/server.env"
@@ -15,26 +18,7 @@ manual_properties=false
 # shellcheck source=libexec/mcserver-kit/i18n.sh
 source "${SCRIPT_DIR}/i18n.sh"
 load_messages
-
-if [[ -z "${NEWT_COLORS:-}" ]]; then
-  export NEWT_COLORS="${MCSERVER_KIT_TUI_COLORS:-
-root=white,black
-window=white,black
-border=lightgray,black
-title=lightcyan,black
-textbox=white,black
-listbox=white,black
-actlistbox=white,blue
-actsellistbox=white,blue
-button=black,lightgray
-actbutton=white,blue
-compactbutton=white,black
-entry=white,black
-label=white,black
-checkbox=white,black
-actcheckbox=white,blue
-}"
-fi
+set_default_tui_colors
 
 die() {
   if command -v whiptail >/dev/null 2>&1; then
@@ -74,11 +58,17 @@ setting_get() {
 }
 
 setting_set() {
+  local property_key error
   if [[ "$manual_properties" == true ]]; then
     case "$1" in
       WHITELIST | EXISTING_WHITELIST_FILE | OPS | EXISTING_OPS_FILE)
         python3 "$CONFIG_TOOL" set "$SERVER_ENV" "$1" "$2" ;;
-      *) python3 "$CONFIG_TOOL" property-set "$SERVER_PROPERTIES" "$1" "$2" ;;
+      *)
+        property_key="$(python3 "$CONFIG_TOOL" property-key "$1")"
+        if ! error="$("${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" properties set "$property_key" "$2" 2>&1)"; then
+          die "$error"
+        fi
+        ;;
     esac
   else
     python3 "$CONFIG_TOOL" set "$SERVER_ENV" "$1" "$2"
@@ -91,7 +81,7 @@ edit_boolean() {
   selected="$(whiptail --title "$label" --radiolist "$label" 12 64 2 \
     true "$(tr properties.enabled)" "$([[ "${current,,}" == true ]] && printf ON || printf OFF)" \
     false "$(tr properties.disabled)" "$([[ "${current,,}" == false ]] && printf ON || printf OFF)" \
-    3>&1 1>&2 2>&3)" || return
+    3>&1 1>&2 2>&3)" || return 0
   setting_set "$key" "$selected"
 }
 
@@ -102,14 +92,14 @@ edit_choice() {
   for value in "$@"; do
     items+=("$value" "$([[ "$value" == "$current" ]] && tr properties.selected || printf ' ')")
   done
-  value="$(whiptail --title "$label" --menu "$label" 17 72 9 "${items[@]}" 3>&1 1>&2 2>&3)" || return
+  value="$(whiptail --title "$label" --menu "$label" 17 72 9 "${items[@]}" 3>&1 1>&2 2>&3)" || return 0
   setting_set "$key" "$value"
 }
 
 edit_number() {
   local key="$1" label="$2" current="$3" minimum="$4" maximum="$5" value
   while true; do
-    value="$(whiptail --title "$label" --inputbox "$label (${minimum}-${maximum})" 10 68 "$current" 3>&1 1>&2 2>&3)" || return
+    value="$(whiptail --title "$label" --inputbox "$label (${minimum}-${maximum})" 10 68 "$current" 3>&1 1>&2 2>&3)" || return 0
     if [[ "$value" =~ ^[0-9]+$ ]] && ((value >= minimum && value <= maximum)); then
       setting_set "$key" "$value"
       return
@@ -120,7 +110,7 @@ edit_number() {
 
 edit_text() {
   local key="$1" label="$2" current="$3" value
-  value="$(whiptail --title "$label" --inputbox "$label" 11 76 "$current" 3>&1 1>&2 2>&3)" || return
+  value="$(whiptail --title "$label" --inputbox "$label" 11 76 "$current" 3>&1 1>&2 2>&3)" || return 0
   setting_set "$key" "$value"
 }
 
@@ -129,7 +119,7 @@ edit_mcid_list() {
   local entries=()
   current="$(setting_get "$key" '')"
   while true; do
-    value="$(whiptail --title "$label" --inputbox "$(tr properties.mcid_list_hint)" 11 76 "$current" 3>&1 1>&2 2>&3)" || return
+    value="$(whiptail --title "$label" --inputbox "$(tr properties.mcid_list_hint)" 11 76 "$current" 3>&1 1>&2 2>&3)" || return 0
     normalized=''
     IFS=',' read -ra entries <<<"$value"
     for entry in "${entries[@]}"; do
@@ -154,7 +144,7 @@ edit_url() {
   local current value
   current="$(setting_get RESOURCE_PACK '')"
   while true; do
-    value="$(whiptail --title "$(tr properties.resource_pack_url)" --inputbox "$(tr properties.resource_pack_url_hint)" 11 76 "$current" 3>&1 1>&2 2>&3)" || return
+    value="$(whiptail --title "$(tr properties.resource_pack_url)" --inputbox "$(tr properties.resource_pack_url_hint)" 11 76 "$current" 3>&1 1>&2 2>&3)" || return 0
     if [[ -z "$value" || "$value" =~ ^https:// ]]; then
       setting_set RESOURCE_PACK "$value"
       return
@@ -167,7 +157,7 @@ edit_uuid() {
   local current value
   current="$(setting_get RESOURCE_PACK_ID '')"
   while true; do
-    value="$(whiptail --title "$(tr properties.resource_pack_id)" --inputbox "$(tr properties.resource_pack_id_hint)" 11 76 "$current" 3>&1 1>&2 2>&3)" || return
+    value="$(whiptail --title "$(tr properties.resource_pack_id)" --inputbox "$(tr properties.resource_pack_id_hint)" 11 76 "$current" 3>&1 1>&2 2>&3)" || return 0
     if [[ -z "$value" || "$value" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
       setting_set RESOURCE_PACK_ID "${value,,}"
       return
@@ -180,7 +170,7 @@ edit_sha1() {
   local current value
   current="$(setting_get RESOURCE_PACK_SHA1 '')"
   while true; do
-    value="$(whiptail --title "$(tr properties.resource_pack_sha1)" --inputbox "$(tr properties.resource_pack_sha1_hint)" 11 76 "$current" 3>&1 1>&2 2>&3)" || return
+    value="$(whiptail --title "$(tr properties.resource_pack_sha1)" --inputbox "$(tr properties.resource_pack_sha1_hint)" 11 76 "$current" 3>&1 1>&2 2>&3)" || return 0
     if [[ -z "$value" || "$value" =~ ^[0-9a-fA-F]{40}$ ]]; then
       setting_set RESOURCE_PACK_SHA1 "${value,,}"
       return
@@ -242,12 +232,15 @@ finish() {
 
 import_properties() {
   local output result
-  whiptail --yesno "$(tr home.import_confirm "$SERVER_ID")" 12 76 || return
+  whiptail --yesno "$(tr home.import_confirm "$SERVER_ID")" 12 76 || return 0
   output="$(mktemp)"
   if "${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" import-properties >"$output" 2>&1; then
     if [[ -s "$output" ]]; then
       whiptail --title "$(tr properties.import)" --textbox "$output" 16 82
       manual_properties=false
+      if [[ "$(python3 "$CONFIG_TOOL" source-mode "$SERVER_DIR")" == properties ]]; then
+        manual_properties=true
+      fi
       changed=true
     fi
   else
@@ -259,25 +252,75 @@ import_properties() {
   rm -f -- "$output"
 }
 
+edit_all_properties() {
+  local status
+  if [[ "$manual_properties" != true ]]; then
+    whiptail --msgbox "$(tr properties.migrate_first)" 12 82 || true
+    return 0
+  fi
+  if python3 "${SCRIPT_DIR}/properties-tui.py" "$SERVER_ID" "$SERVER_DIR"; then
+    return 0
+  else
+    status=$?
+    # 10 means saved changes; other errors have already been shown by the editor.
+    [[ "$status" != 10 ]] || changed=true
+  fi
+}
+
+backup_properties() {
+  [[ "$manual_properties" == true ]] || return 0
+  run_checked "${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" properties backup
+}
+
+restore_properties() {
+  local listing backup_id selected
+  local items=()
+  [[ "$manual_properties" == true ]] || return 0
+  if ! listing="$("${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" properties backups 2>&1)"; then
+    whiptail --title "$(tr common.error)" --msgbox "$listing" 14 82 || true
+    return 0
+  fi
+  if [[ -z "$listing" ]]; then
+    whiptail --title "$SERVER_ID" --msgbox "$(tr properties.tui_no_backups)" 10 78 || true
+    return 0
+  fi
+  while IFS= read -r backup_id; do
+    [[ -n "$backup_id" ]] && items+=("$backup_id" "$(tr properties.tui_snapshot)")
+  done <<<"$listing"
+  selected="$(whiptail --title "$SERVER_ID" --menu "$(tr properties.tui_choose_backup)" 20 96 12 "${items[@]}" 3>&1 1>&2 2>&3)" || return 0
+  whiptail --title "$SERVER_ID" --yesno "$(tr properties.tui_restore_confirm "$selected")" 13 84 || return 0
+  run_checked "${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" properties restore "$selected"
+  changed=true
+}
+
 main() {
-  local selected
+  local selected source_mode
   local items
   command -v whiptail >/dev/null 2>&1 || die "$(tr properties.whiptail_missing)"
   [[ -f "${SERVER_DIR}/compose.yaml" ]] || die "$(tr server.compose_missing "$SERVER_ID")"
 
-  if [[ ! -f "$SERVER_ENV" ]]; then
-    whiptail --yesno "$(tr properties.migration_prompt)" 11 76 || return 0
+  source_mode="$(python3 "$CONFIG_TOOL" source-mode "$SERVER_DIR")" || die "$(tr properties.source_check_failed)"
+  if [[ "$source_mode" != properties ]]; then
+    whiptail --title "$SERVER_ID" --yesno "$(tr properties.migration_prompt)" 13 82 || return 0
+    run_checked "${SCRIPT_DIR}/server-manager.sh" server "$SERVER_ID" properties migrate
   fi
-  run_checked python3 "$CONFIG_TOOL" migrate "$SERVER_DIR"
-  if [[ "$(python3 "$CONFIG_TOOL" get "$SERVER_ENV" OVERRIDE_SERVER_PROPERTIES true)" == false ]]; then
-    [[ -f "$SERVER_PROPERTIES" ]] || die "$(tr properties.file_missing)"
-    local running
-    running="$(cd "$SERVER_DIR" && docker compose ps --status running --services)" || die "$(tr server.status_failed)"
-    if [[ -n "$running" ]]; then
-      die "$(tr properties.stop_first "$SERVER_ID")"
-    fi
-    manual_properties=true
+  [[ "$(python3 "$CONFIG_TOOL" source-mode "$SERVER_DIR")" == properties ]] ||
+    die "$(tr properties.source_check_failed)"
+  [[ -f "$SERVER_PROPERTIES" ]] || die "$(tr properties.file_missing)"
+  local running status output
+  output="$(mktemp)"
+  if (cd "$SERVER_DIR" && docker compose ps --status running --services) >"$output" 2>&1; then
+    running="$(<"$output")"
+    rm -f -- "$output"
+  else
+    status=$?
+    [[ -s "$output" ]] || printf '%s\n' "$(tr server.status_failed)" >"$output"
+    whiptail --title "$(tr common.error)" --textbox "$output" 22 84 || true
+    rm -f -- "$output"
+    return "$status"
   fi
+  [[ -z "$running" ]] || die "$(tr properties.stop_first "$SERVER_ID")"
+  manual_properties=true
   cd -- "$SERVER_DIR"
   run_checked docker compose config --quiet
 
@@ -301,11 +344,17 @@ main() {
       __more "$(tr properties.more_settings)"
       __resource "$(tr properties.resource_pack_settings)"
       __import "$(tr properties.import)"
+      __all "$(tr properties.editor.title)"
+      __backup "$(tr properties.tui_backup)"
+      __restore "$(tr properties.tui_restore)"
       __exit "$(tr properties.exit)"
     )
     selected="$(whiptail --title "${SERVER_ID}" --menu "$(tr properties.choose)" 25 94 18 "${items[@]}" 3>&1 1>&2 2>&3)" || break
     case "$selected" in
       __exit) break ;;
+      __all) edit_all_properties ;;
+      __backup) backup_properties ;;
+      __restore) restore_properties ;;
       __import) import_properties || true ;;
       __more)
         selected="$(whiptail --title "${SERVER_ID}" --menu "$(tr properties.more_settings)" 24 90 15 \

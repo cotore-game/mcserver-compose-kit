@@ -108,6 +108,40 @@ JSON
     'locale messages preserve their final newline'
 }
 
+test_server_raw_listing() {
+  local temp_dir="$1"
+  local root="${temp_dir}/raw-list/servers"
+  local fake_bin="${temp_dir}/raw-list/bin"
+  local config_file="${temp_dir}/raw-list/config.yml"
+  local output
+  mkdir -p "${root}/alpha" "${root}/beta" "$fake_bin"
+  : >"${root}/alpha/compose.yaml"
+  : >"${root}/beta/compose.yaml"
+  cat >"$config_file" <<CONFIG
+paths:
+  server_root: "$root"
+CONFIG
+  cat >"${fake_bin}/docker" <<'DOCKER'
+#!/usr/bin/env bash
+if [[ "$*" != 'compose ps -a --format json' ]]; then exit 2; fi
+case "$PWD" in
+  */alpha) printf '{"Service":"minecraft","State":"running"}\n' ;;
+  */beta) printf '[]\n' ;;
+esac
+DOCKER
+  chmod +x "${fake_bin}/docker"
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=ja MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" list --raw)"
+  assert_equal $'alpha\trunning\nbeta\tabsent' "$output" 'raw listing reports each server once in a stable machine-readable format'
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" list)"
+  assert_equal 'present' "$(grep -q 'alpha' <<<"$output" && grep -q 'beta' <<<"$output" && printf present)" \
+    'human-readable listing remains available'
+  assert_fails 'raw listing rejects unknown options' \
+    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+      bash "${REPO_ROOT}/mcserver-kit" list --unknown
+}
+
 test_installer_version_selection() {
   local installer_output
 
@@ -149,6 +183,13 @@ printf '%s' "$MCSERVER_KIT_TEST_LATEST_URL"
 CURL
   chmod +x "${fake_bin}/curl"
 
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_CURRENT_VERSION=1.1.0 \
+    MCSERVER_KIT_UPDATE_CACHE_DIR="$cache_dir" MCSERVER_KIT_TEST_CURL_COUNT="$curl_count" \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/update.sh" --cached-only-quiet)"
+  assert_equal '' "$output" 'dashboard check is empty before a cache exists'
+  assert_equal 'absent' "$([[ ! -e "$curl_count" ]] && printf absent)" \
+    'dashboard check does not fetch a missing cache synchronously'
+
   output="$(PATH="${fake_bin}:$PATH" \
     MCSERVER_KIT_CURRENT_VERSION=1.1.0 \
     MCSERVER_KIT_UPDATE_CACHE_DIR="$cache_dir" \
@@ -168,6 +209,12 @@ CURL
   assert_equal '1' "$(wc -c <"$curl_count" | tr -d ' ')" 'a fresh update cache avoids another network request'
   assert_equal '600' "$(stat -c '%a' "${cache_dir}/update-check")" 'the update cache is private'
 
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_CURRENT_VERSION=1.1.0 \
+    MCSERVER_KIT_UPDATE_CACHE_DIR="$cache_dir" MCSERVER_KIT_TEST_CURL_COUNT="$curl_count" \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/update.sh" --cached-only-quiet)"
+  assert_equal 'v1.1.1' "$output" 'dashboard displays an available cached release'
+  assert_equal '1' "$(wc -c <"$curl_count" | tr -d ' ')" 'dashboard does not repeat the network request'
+
   output="$(PATH="${fake_bin}:$PATH" \
     MCSERVER_KIT_CURRENT_VERSION=1.1.1 \
     MCSERVER_KIT_UPDATE_CACHE_DIR="${temp_dir}/update/current-cache" \
@@ -184,6 +231,13 @@ CURL
     PATH="${fake_bin}:$PATH" \
     bash "${REPO_ROOT}/libexec/mcserver-kit/update.sh" --cached-quiet >"${temp_dir}/update/newer-output"
   assert_equal 'empty' "$([[ ! -s "${temp_dir}/update/newer-output" ]] && printf empty)" 'automatic checks do not offer an older release'
+
+  printf '1\nv1.1.1\n' >"${cache_dir}/update-check"
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_CURRENT_VERSION=1.1.0 \
+    MCSERVER_KIT_UPDATE_CACHE_DIR="$cache_dir" MCSERVER_KIT_TEST_CURL_COUNT="$curl_count" \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/update.sh" --cached-only-quiet)"
+  assert_equal '' "$output" 'dashboard ignores an expired cache without waiting for refresh'
+  assert_equal '3' "$(wc -c <"$curl_count" | tr -d ' ')" 'expired dashboard cache does not trigger a network request'
 
   mkdir -p "$fake_root"
   printf '1.1.0\n' >"${fake_root}/VERSION"
@@ -370,7 +424,10 @@ CONFIG
   assert_equal 'present' "$([[ -f "${target}/.env" ]] && printf present)" 'the creation flow writes .env'
   assert_equal 'present' "$([[ -f "${target}/server.env" ]] && printf present)" 'the creation flow writes unified Minecraft settings'
   assert_equal 'present' "$(grep -q '^    env_file:$' "${target}/compose.yaml" && printf present)" 'Compose loads unified Minecraft settings'
-  assert_equal 'survival' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${target}/server.env" MODE)" 'new servers default to survival mode'
+  assert_equal 'survival' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "${target}/data/server.properties" gamemode)" 'new servers default to survival mode in server.properties'
+  assert_equal 'properties' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" source-mode "$target")" 'new servers use properties without a migration step'
+  assert_equal 'absent' "$(! grep -q '^MODE=' "${target}/server.env" && printf absent)" 'new servers have no duplicate game mode environment setting'
+  assert_equal 'absent' "$(! grep -q '^      LEVEL:' "${target}/compose.yaml" && printf absent)" 'world selection is stored in properties instead of Compose'
   assert_equal 'present' "$([[ -f "${target}/data/world/level.dat" ]] && printf present)" 'the creation flow copies the world'
   assert_equal 'present' "$(grep -q '\[5/5\].*Docker Compose設定を検証' "$output_log" && printf present)" 'the creation flow reports Compose validation progress'
 }
@@ -484,6 +541,55 @@ WHIPTAIL
   assert_equal 'present' "$(grep -Fq "Update available: $next_version" "$whiptail_log" && printf present)" 'the dashboard announces a newer cached release'
 }
 
+test_home_background_update() {
+  local temp_dir="$1"
+  local root="${temp_dir}/home-background"
+  local fake_bin="${root}/bin"
+  local config_file="${root}/config.yml"
+  local cache_dir="${root}/cache"
+  local menu_log="${root}/menu.log"
+  local start_ms elapsed_ms
+  mkdir -p "$fake_bin"
+  cat >"$config_file" <<CONFIG
+paths:
+  server_root: "${root}/servers"
+CONFIG
+  cat >"${fake_bin}/whiptail" <<'WHIPTAIL'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$MCSERVER_KIT_TEST_MENU_LOG"
+printf exit >&2
+WHIPTAIL
+  cat >"${fake_bin}/curl" <<'CURL'
+#!/usr/bin/env bash
+sleep 2
+printf '%s' 'https://github.com/cotore-game/mcserver-compose-kit/releases/tag/v1.1.1'
+CURL
+  chmod +x "${fake_bin}/whiptail" "${fake_bin}/curl"
+
+  start_ms="$(date +%s%3N)"
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_CURRENT_VERSION=1.1.0 MCSERVER_KIT_UPDATE_CACHE_DIR="$cache_dir" \
+    MCSERVER_KIT_TEST_MENU_LOG="$menu_log" MCSERVER_KIT_TUI_TEST=true \
+    bash "${REPO_ROOT}/mcserver-kit" home
+  elapsed_ms=$(($(date +%s%3N) - start_ms))
+  tests_run=$((tests_run + 1))
+  if ((elapsed_ms >= 1500)); then
+    printf 'FAIL: home waited %s ms for background update\n' "$elapsed_ms" >&2
+    return 1
+  fi
+  assert_equal 'absent' "$(grep -Fq 'Update available:' "$menu_log" && printf present || printf absent)" \
+    'home displays immediately without a new release cache'
+  sleep 2.3
+  assert_equal 'v1.1.1' "$(sed -n '2p' "${cache_dir}/update-check")" \
+    'background check refreshes the release cache'
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_CURRENT_VERSION=1.1.0 MCSERVER_KIT_UPDATE_CACHE_DIR="$cache_dir" \
+    MCSERVER_KIT_TEST_MENU_LOG="$menu_log" MCSERVER_KIT_TUI_TEST=true \
+    bash "${REPO_ROOT}/mcserver-kit" home
+  assert_equal 'present' "$(grep -Fq 'Update available: v1.1.1' "$menu_log" && printf present)" \
+    'next home redraw displays the refreshed release'
+}
+
 test_home_screen_transition_after_current_update() {
   local temp_dir="$1" repo_version
   local config_file="${temp_dir}/home-transition/config.yml"
@@ -529,7 +635,7 @@ CURL
     MCSERVER_KIT_UPDATE_CACHE_DIR="${temp_dir}/home-transition/cache" \
     MCSERVER_KIT_TEST_EVENTS="$event_log" MCSERVER_KIT_TEST_MENU_COUNT="$menu_count" \
     bash "${REPO_ROOT}/mcserver-kit" home)"
-  assert_equal 'present' "$(grep -Fq 'loading' "$event_log" && printf present)" 'update checks retain a progress dialog'
+  assert_equal 'absent' "$(grep -Fq 'loading' "$event_log" && printf present || printf absent)" 'progress no longer repeatedly opens whiptail infobox'
   assert_equal 'present' "$(grep -Fq 'result' "$event_log" && printf present)" 'update result is shown in a persistent dialog'
   assert_equal 'menu' "$(tail -n 1 "$event_log")" 'the home menu returns after viewing the update result'
 }
@@ -695,11 +801,288 @@ DOCKER
       MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" bash "${REPO_ROOT}/mcserver-kit" server ../alpha status
 }
 
+test_properties_source_migration_and_cli() {
+  local temp_dir="$1"
+  local root="${temp_dir}/properties-source/servers"
+  local server_dir="${root}/alpha"
+  local config_file="${temp_dir}/properties-source/config.yml"
+  local fake_bin="${temp_dir}/properties-source/bin"
+  local import_dir="${temp_dir}/properties-source/import"
+  local properties="${server_dir}/data/server.properties"
+  local output backup_id
+
+  mkdir -p "$fake_bin" "$import_dir" "${server_dir}/data/world"
+  cat >"$config_file" <<CONFIG
+paths:
+  server_root: "$root"
+CONFIG
+  cat >"${server_dir}/.env" <<'ENV'
+MC_VERSION="26.3"
+MC_MEMORY="8G"
+ENV
+  cat >"${server_dir}/server.env" <<'ENV'
+MOTD="Environment MOTD"
+DIFFICULTY="hard"
+WHITELIST="Alice"
+EXISTING_WHITELIST_FILE="SYNC_FILE_MERGE_LIST"
+OPS="Admin"
+EXISTING_OPS_FILE="SYNC_FILE_MERGE_LIST"
+CUSTOM_SERVER_PROPERTIES="plugin.option=enabled"
+OVERRIDE_SERVER_PROPERTIES="true"
+ENV
+  cat >"${server_dir}/compose.yaml" <<'COMPOSE'
+services:
+  minecraft:
+    image: itzg/minecraft-server:latest
+    env_file:
+      - server.env
+    environment:
+      EULA: "TRUE"
+      VERSION: "${MC_VERSION}"
+      MEMORY: "${MC_MEMORY}"
+      LEVEL: "world"
+      PVP: "false"
+    volumes:
+      - ./data:/data
+COMPOSE
+  cat >"$properties" <<'PROPERTIES'
+# Keep this operator comment
+motd=Old MOTD
+difficulty=easy
+pvp=true
+level-name=world
+server-port=25565
+PROPERTIES
+  cat >"${fake_bin}/docker" <<'DOCKER'
+#!/usr/bin/env bash
+if [[ "$*" == 'compose ps --status running --services' && "${MCSERVER_KIT_TEST_RUNNING:-false}" == true ]]; then
+  printf 'minecraft\n'
+fi
+exit 0
+DOCKER
+  chmod +x "${fake_bin}/docker"
+
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties migrate)"
+  assert_equal 'present' "$(grep -q 'is now the source of truth' <<<"$output" && printf present)" 'migration reports the source-of-truth switch'
+  assert_equal 'properties' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" source-mode "$server_dir")" 'migration marks server.properties as authoritative'
+  assert_equal 'Environment MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" motd)" 'migration applies the effective environment MOTD'
+  assert_equal 'hard' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" difficulty)" 'migration applies managed environment properties'
+  assert_equal 'false' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" pvp)" 'migration applies direct Compose property overrides'
+  assert_equal 'enabled' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" plugin.option)" 'migration preserves custom properties'
+  assert_equal 'present' "$(grep -q '^# Keep this operator comment$' "$properties" && printf present)" 'migration preserves existing comments'
+  assert_equal 'absent' "$(! grep -q '^MOTD=' "${server_dir}/server.env" && printf absent)" 'migration removes duplicated property variables from server.env'
+  assert_equal 'Alice' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" WHITELIST)" 'migration retains non-property whitelist membership management'
+  assert_equal 'absent' "$(! grep -q '^      PVP:' "${server_dir}/compose.yaml" && printf absent)" 'migration removes direct Compose property overrides'
+  assert_equal 'present' "$(find "${server_dir}/backups/source-migrations" -name server.env -type f -print -quit | grep -q . && printf present)" 'migration backs up the previous server.env'
+  assert_equal 'present' "$(find "${server_dir}/backups/source-migrations" -name server.properties -type f -print -quit | grep -q . && printf present)" 'migration backs up the previous server.properties'
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties migrate)"
+  assert_equal 'present' "$(grep -q 'already the source of truth' <<<"$output" && printf present)" 'repeated migration is a no-op'
+  assert_equal '1' "$(find "${server_dir}/backups/source-migrations" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" 'repeated migration does not create another backup'
+  cat >"${fake_bin}/whiptail" <<'WHIPTAIL'
+#!/usr/bin/env bash
+case " $* " in
+  *' --menu '*) printf '__exit' >&2 ;;
+  *' --yesno '*) exit 1 ;;
+esac
+WHIPTAIL
+  chmod +x "${fake_bin}/whiptail"
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+    bash "${REPO_ROOT}/libexec/mcserver-kit/server-properties-tui.sh" alpha "$server_dir"
+  assert_equal 'absent' "$(! grep -q '^MOTD=' "${server_dir}/server.env" && printf absent)" 'opening the TUI does not recreate property variables after migration'
+
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties list)"
+  assert_equal 'present' "$(grep -q '^plugin.option=enabled$' <<<"$output" && printf present)" 'the CLI lists arbitrary properties'
+  assert_equal 'Environment MOTD' "$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties get motd)" 'the CLI reads a property by its Minecraft key'
+  assert_fails 'the CLI rejects a level-name outside the managed data/world layout' \
+    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+      bash "${REPO_ROOT}/mcserver-kit" server alpha properties set level-name OtherWorld
+  assert_equal 'world' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" level-name)" 'a rejected world path does not alter server.properties'
+
+  assert_fails 'property mutation is refused while the server is running' \
+    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+      MCSERVER_KIT_TEST_RUNNING=true bash "${REPO_ROOT}/mcserver-kit" server alpha properties set motd unsafe
+  assert_equal 'Environment MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" motd)" 'a refused running-server edit leaves properties unchanged'
+
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties backup >/dev/null
+  backup_id="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties backups | head -n 1)"
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties set motd 'Changed MOTD' >/dev/null
+  assert_equal 'Changed MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" motd)" 'the CLI edits the authoritative file directly'
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties add mod.custom 'custom value' >/dev/null
+  assert_equal 'custom value' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" mod.custom)" 'the CLI adds unknown mod properties'
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties remove mod.custom >/dev/null
+  assert_equal 'absent' "$(! grep -q '^mod.custom=' "$properties" && printf absent)" 'the CLI removes arbitrary properties'
+  cat >"${import_dir}/server.properties" <<'PROPERTIES'
+motd=Imported MOTD
+level-name=DistributedWorld
+server-port=25565
+plugin.imported=true
+PROPERTIES
+  output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties import "${import_dir}/server.properties")"
+  assert_equal 'present' "$(grep -q 'is the source of truth' <<<"$output" && printf present)" 'direct import reports the authoritative properties file'
+  assert_equal 'Imported MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" motd)" 'direct import replaces properties content'
+  assert_equal 'world' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" level-name)" 'direct import retains the managed data/world layout'
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    bash "${REPO_ROOT}/mcserver-kit" server alpha properties restore "$backup_id" >/dev/null
+  assert_equal 'Environment MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" motd)" 'restore replaces the file with the selected snapshot'
+  assert_equal 'present' "$(find "${server_dir}/backups/server-properties" -name '*-before-restore.properties' -print -quit | grep -q . && printf present)" 'restore first backs up the file it replaces'
+}
+
+test_server_deletion() {
+  local temp_dir="$1"
+  local root="${temp_dir}/server-deletion/servers"
+  local outside="${temp_dir}/server-deletion/outside"
+  local config_file="${temp_dir}/server-deletion/config.yml"
+  local fake_bin="${temp_dir}/server-deletion/bin"
+  local docker_log="${temp_dir}/server-deletion/docker.log"
+  local id output
+
+  mkdir -p "$fake_bin" "$outside/data"
+  : >"${outside}/compose.yaml"
+  : >"${outside}/data/must-survive"
+  for id in cancelled mismatch down-failure deleted; do
+    mkdir -p "${root}/${id}/data"
+    : >"${root}/${id}/compose.yaml"
+    : >"${root}/${id}/data/world-data"
+    : >"${root}/${id}/server.env"
+  done
+  ln -s "$outside" "${root}/linked"
+  cat >"$config_file" <<CONFIG
+paths:
+  server_root: "$root"
+CONFIG
+  cat >"${fake_bin}/docker" <<'DOCKER'
+#!/usr/bin/env bash
+printf '%s|%s\n' "$PWD" "$*" >>"$MCSERVER_KIT_TEST_DOCKER_LOG"
+if [[ "$*" == 'compose down' && "${MCSERVER_KIT_TEST_DOWN_FAILURE:-false}" == true ]]; then
+  printf 'simulated compose down failure\n' >&2
+  exit 42
+fi
+DOCKER
+  chmod +x "${fake_bin}/docker"
+
+  output="$(printf 'n\n' | PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+    MCSERVER_KIT_CONFIG="$config_file" MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" \
+    bash "${REPO_ROOT}/mcserver-kit" server cancelled delete 2>&1)"
+  assert_equal 'present' "$([[ -d "${root}/cancelled" ]] && printf present)" 'first deletion confirmation can cancel without changing the server'
+  assert_equal 'present' "$(grep -Fq "Target: ${root}/cancelled" <<<"$output" && printf present)" 'deletion shows the exact absolute target path'
+
+  output="$(printf 'y\nwrong-id\n' | PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+    MCSERVER_KIT_CONFIG="$config_file" MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" \
+    bash "${REPO_ROOT}/mcserver-kit" server mismatch delete 2>&1)"
+  assert_equal 'present' "$([[ -d "${root}/mismatch" ]] && printf present)" 'a mismatched server ID preserves the server'
+  assert_equal 'present' "$(grep -q 'Nothing was deleted' <<<"$output" && printf present)" 'an ID mismatch reports that nothing was deleted'
+
+  assert_fails 'a symbolic-link server target is rejected before confirmation' \
+    env PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+      MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" bash "${REPO_ROOT}/mcserver-kit" server linked delete
+  assert_equal 'present' "$([[ -f "${outside}/data/must-survive" ]] && printf present)" 'rejecting a symbolic link preserves its external target'
+
+  tests_run=$((tests_run + 1))
+  if printf 'y\ndown-failure\n' | PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+    MCSERVER_KIT_CONFIG="$config_file" MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" \
+    MCSERVER_KIT_TEST_DOWN_FAILURE=true \
+    bash "${REPO_ROOT}/mcserver-kit" server down-failure delete >/dev/null 2>&1; then
+    printf 'FAIL: a compose down failure should abort permanent deletion\n' >&2
+    return 1
+  fi
+  assert_equal 'present' "$([[ -f "${root}/down-failure/data/world-data" ]] && printf present)" 'a compose down failure preserves the complete server folder'
+
+  output="$(printf 'y\ndeleted\n' | PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+    MCSERVER_KIT_CONFIG="$config_file" MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" \
+    bash "${REPO_ROOT}/mcserver-kit" server deleted delete 2>&1)"
+  assert_equal 'absent' "$([[ ! -e "${root}/deleted" ]] && printf absent)" 'two matching confirmations permanently delete the server folder'
+  assert_equal 'present' "$(grep -Fq "${root}/deleted|compose down" "$docker_log" && printf present)" 'containers are brought down before deleting the server folder'
+  assert_equal 'present' "$(grep -q 'Permanently deleted server deleted' <<<"$output" && printf present)" 'successful deletion reports the deleted server ID'
+}
+
+test_home_server_deletion() {
+  local temp_dir="$1"
+  local root="${temp_dir}/home-delete/servers"
+  local server_dir="${root}/alpha"
+  local config_file="${temp_dir}/home-delete/config.yml"
+  local fake_bin="${temp_dir}/home-delete/bin"
+  local menu_count="${temp_dir}/home-delete/menu-count"
+  local docker_log="${temp_dir}/home-delete/docker.log"
+  local dialog_log="${temp_dir}/home-delete/dialog.log"
+
+  mkdir -p "$fake_bin" "${server_dir}/data"
+  : >"${server_dir}/compose.yaml"
+  : >"${server_dir}/data/world-data"
+  cat >"$config_file" <<CONFIG
+paths:
+  server_root: "$root"
+CONFIG
+  cat >"${fake_bin}/docker" <<'DOCKER'
+#!/usr/bin/env bash
+printf '%s|%s\n' "$PWD" "$*" >>"$MCSERVER_KIT_TEST_DOCKER_LOG"
+if [[ "$*" == 'compose ps -a --format json' ]]; then
+  printf '[]\n'
+fi
+DOCKER
+  cat >"${fake_bin}/whiptail" <<'WHIPTAIL'
+#!/usr/bin/env bash
+case " $* " in
+  *' --menu '*)
+    count=0
+    [[ ! -f "$MCSERVER_KIT_TEST_MENU_COUNT" ]] || count="$(<"$MCSERVER_KIT_TEST_MENU_COUNT")"
+    count=$((count + 1))
+    printf '%s\n' "$count" >"$MCSERVER_KIT_TEST_MENU_COUNT"
+    case "$count" in
+      1) printf 'servers' >&2 ;;
+      2) printf 'alpha' >&2 ;;
+      3) printf 'delete' >&2 ;;
+      4) printf '__back' >&2 ;;
+      *) printf 'exit' >&2 ;;
+    esac
+    ;;
+  *' --yesno '*)
+    printf 'first-confirmation|%s\n' "$*" >>"$MCSERVER_KIT_TEST_DIALOG_LOG"
+    exit 0
+    ;;
+  *' --inputbox '*)
+    printf 'second-confirmation|%s\n' "$*" >>"$MCSERVER_KIT_TEST_DIALOG_LOG"
+    printf 'alpha' >&2
+    ;;
+  *' --textbox '*)
+    while (($#)); do
+      if [[ "$1" == --textbox ]]; then
+        shift
+        printf 'result|%s\n' "$(<"$1")" >>"$MCSERVER_KIT_TEST_DIALOG_LOG"
+        break
+      fi
+      shift
+    done
+    ;;
+esac
+WHIPTAIL
+  chmod +x "${fake_bin}/docker" "${fake_bin}/whiptail"
+
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
+    MCSERVER_KIT_TUI_TEST=true MCSERVER_KIT_TEST_MENU_COUNT="$menu_count" \
+    MCSERVER_KIT_TEST_DOCKER_LOG="$docker_log" MCSERVER_KIT_TEST_DIALOG_LOG="$dialog_log" \
+    bash "${REPO_ROOT}/mcserver-kit" home
+
+  assert_equal 'absent' "$([[ ! -e "$server_dir" ]] && printf absent)" 'the TUI permanently deletes a server after both confirmations'
+  assert_equal 'present' "$(grep -Fq "Target: ${server_dir}" "$dialog_log" && printf present)" 'the TUI first confirmation shows the absolute deletion target'
+  assert_equal 'present' "$(grep -Fq "Type the server ID 'alpha'" "$dialog_log" && printf present)" 'the TUI requires the exact server ID as its second confirmation'
+  assert_equal 'present' "$(grep -Fq "${server_dir}|compose down" "$docker_log" && printf present)" 'the TUI brings containers down before deleting the server folder'
+}
 test_server_property_editor() {
   local temp_dir="$1"
-  local server_dir="${temp_dir}/property-editor/server"
+  local server_dir="${temp_dir}/property-editor/alpha"
   local properties="${server_dir}/data/server.properties"
   local server_env="${server_dir}/server.env"
+  local config_file="${temp_dir}/property-editor/config.yml"
   local fake_bin="${temp_dir}/property-editor/bin"
   local whiptail_state="${temp_dir}/property-editor/whiptail-state"
   mkdir -p "$(dirname -- "$properties")"
@@ -717,6 +1100,8 @@ services:
       MAX_PLAYERS: "12"
       MOTD: "${MC_MOTD}"
       ALLOW_FLIGHT: "TRUE"
+      ENABLE_RCON: "true"
+      RCON_PASSWORD: "legacy-secret"
     volumes:
       - ./data:/data
 COMPOSE
@@ -727,24 +1112,27 @@ pvp=true
 view-distance=10
 PROPERTIES
 
-  python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" migrate "$server_dir"
-  assert_equal 'present' "$([[ -f "${server_dir}/compose.yaml.mcserver-kit.bak" ]] && printf present)" 'migration backs up the original Compose file'
-  assert_equal 'present' "$(grep -q '^      DIFFICULTY:' "${server_dir}/compose.yaml.mcserver-kit.bak" && printf present)" 'the migration backup preserves original settings'
-  assert_equal 'Existing MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "$server_env" MOTD)" 'migration resolves existing Compose interpolation'
-  assert_equal 'normal' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "$server_env" DIFFICULTY)" 'migration prefers existing Compose settings over server.properties'
-  assert_equal 'true' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "$server_env" PVP)" 'migration imports properties not managed by Compose'
+  python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" migrate-to-properties "$server_dir" >/dev/null
+  assert_equal 'present' "$(find "${server_dir}/backups/source-migrations" -name compose.yaml -type f -print -quit | grep -q . && printf present)" 'migration backs up the original Compose file'
+  assert_equal 'present' "$(grep -q '^      DIFFICULTY:' "${server_dir}"/backups/source-migrations/*/compose.yaml && printf present)" 'the migration backup preserves original settings'
+  assert_equal 'properties' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" source-mode "$server_dir")" 'migration uses server.properties in one step'
+  assert_equal 'Existing MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" motd)" 'migration resolves existing Compose interpolation'
+  assert_equal 'normal' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" difficulty)" 'migration prefers existing Compose settings'
+  assert_equal 'true' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" pvp)" 'migration preserves properties not managed by Compose'
   assert_equal 'Alice,Bob' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "$server_env" WHITELIST)" 'migration imports the existing whitelist'
-  assert_equal 'true' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "$server_env" ENABLE_WHITELIST)" 'migration keeps a configured whitelist enabled'
+  assert_equal 'true' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" white-list)" 'migration keeps a configured whitelist enabled'
+  assert_equal 'legacy-secret' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" rcon.password)" 'migration preserves legacy Compose RCON settings'
+  assert_equal 'legacy-secret' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "$server_env" RCON_PASSWORD)" 'RCON client settings follow the authoritative file'
   assert_equal 'present' "$(grep -q '^    env_file:$' "${server_dir}/compose.yaml" && printf present)" 'migration adds server.env to Compose'
   assert_equal 'absent' "$(! grep -q '^      DIFFICULTY:' "${server_dir}/compose.yaml" && printf absent)" 'migration removes conflicting Compose property values'
   assert_equal '600' "$(stat -c '%a' "$server_env")" 'unified settings are private'
 
-  python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" migrate "$server_dir"
+  python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" migrate-to-properties "$server_dir" >/dev/null
   assert_equal '1' "$(grep -c '^      - server.env$' "${server_dir}/compose.yaml")" 'migration is idempotent'
 
-  python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" set "$server_env" DIFFICULTY hard
-  assert_equal 'hard' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "$server_env" DIFFICULTY)" 'the settings editor updates server.env atomically'
-  assert_equal 'present' "$(grep -q '^difficulty=easy$' "$properties" && printf present)" 'migration does not directly rewrite server.properties'
+  python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-set "$properties" difficulty hard
+  assert_equal 'hard' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" difficulty)" 'the settings editor updates the authoritative file'
+  assert_equal 'absent' "$(! grep -q '^DIFFICULTY=' "$server_env" && printf absent)" 'the environment has no duplicate difficulty setting'
 
   mkdir -p "$fake_bin"
   cat >"${fake_bin}/docker" <<'DOCKER'
@@ -767,10 +1155,14 @@ case " $* " in
 esac
 WHIPTAIL
   chmod +x "${fake_bin}/docker" "${fake_bin}/whiptail"
-  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+  cat >"$config_file" <<CONFIG
+paths:
+  server_root: "$(dirname "$server_dir")"
+CONFIG
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
     MCSERVER_KIT_TEST_WHIPTAIL_STATE="$whiptail_state" \
     bash "${REPO_ROOT}/libexec/mcserver-kit/server-properties-tui.sh" alpha "$server_dir" >/dev/null
-  assert_equal 'Unified MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "$server_env" MOTD)" 'the properties TUI updates unified settings'
+  assert_equal 'Unified MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "$properties" motd)" 'the properties TUI updates the authoritative file'
 }
 
 test_property_import_and_explorer() {
@@ -840,7 +1232,7 @@ EXPLORER
   assert_fails 'invalid property input is rejected before migration' \
     env PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
       bash "${REPO_ROOT}/mcserver-kit" server alpha import-properties "${source_dir}/invalid.properties"
-  assert_equal 'absent' "$(! grep -q '^MAX_PLAYERS=' "${server_dir}/server.env" && printf absent)" 'invalid import does not migrate server settings'
+  assert_equal 'absent' "$([[ ! -d "${server_dir}/backups/source-migrations" ]] && printf absent)" 'invalid import does not migrate server settings'
 
   mkdir -p "${source_dir}/incompatible"
   cat >"${source_dir}/incompatible/server.properties" <<'PROPERTIES'
@@ -868,17 +1260,17 @@ PROPERTIES
   output="$(PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
     bash "${REPO_ROOT}/mcserver-kit" server alpha import-properties "${source_dir}/server.properties")"
   assert_equal 'Distributed MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-get "${server_dir}/data/server.properties" MOTD)" 'import copies the supplied server.properties'
-  assert_equal 'true' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" OVERRIDE_SERVER_PROPERTIES)" 'import keeps server.env authoritative'
-  assert_equal 'Distributed MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" MOTD)" 'import converts managed properties to environment settings'
-  assert_equal 'hard' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" DIFFICULTY)" 'import updates the difficulty'
-  assert_equal $'level-type=minecraft:normal\ncustom-setting=preserve-me\nplugin.option=enabled\nplugin.label=§a\nplugin.description=first second' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" CUSTOM_SERVER_PROPERTIES)" 'import decodes Java escapes and keeps extra properties'
-  assert_equal 'absent' "$(! python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" CUSTOM_SERVER_PROPERTIES | grep -q '^level-name=' && printf absent)" 'source world name does not override the managed world directory'
+  assert_equal 'properties' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" source-mode "$server_dir")" 'import migrates directly to server.properties authority'
+  assert_equal 'absent' "$(! grep -q '^MOTD=' "${server_dir}/server.env" && printf absent)" 'import does not copy properties into server.env'
+  assert_equal 'hard' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "${server_dir}/data/server.properties" difficulty)" 'import updates difficulty in the authoritative file'
+  assert_equal 'minecraft:normal' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "${server_dir}/data/server.properties" level-type)" 'import decodes Java escapes'
+  assert_equal 'first second' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "${server_dir}/data/server.properties" plugin.description)" 'import preserves continued property values'
+  assert_equal 'world' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-key-get "${server_dir}/data/server.properties" level-name)" 'source world name does not override the managed world directory'
   assert_equal 'present' "$(grep -q 'custom-setting=preserve-me' "${server_dir}/data/server.properties" && printf present)" 'import keeps custom settings'
-  assert_equal 'present' "$(grep -q 'motd=Old MOTD' "${server_dir}"/data/server.properties.mcserver-kit.*.bak && printf present)" 'import backs up the previous properties'
+  assert_equal 'present' "$(grep -q 'motd=Old MOTD' "${server_dir}"/backups/server-properties/*-before-import.properties && printf present)" 'import backs up the previous properties'
   assert_equal 'present' "$(grep -q 'Previous server.properties backup' <<<"$output" && printf present)" 'import reports the backup location'
 
-  python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" migrate "$server_dir"
-  assert_equal 'true' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" OVERRIDE_SERVER_PROPERTIES)" 'later migration preserves environment property mode'
+  assert_equal 'present' "$(find "${server_dir}/backups/source-migrations" -name server.env -type f -print -quit | grep -q . && printf present)" 'import migration backs up server.env'
 
   cat >"${fake_bin}/whiptail" <<'WHIPTAIL'
 #!/usr/bin/env bash
@@ -897,11 +1289,11 @@ case " $* " in
 esac
 WHIPTAIL
   chmod +x "${fake_bin}/whiptail"
-  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en \
+  PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
     MCSERVER_KIT_TEST_WHIPTAIL_STATE="${temp_dir}/property-import/whiptail-state" \
     bash "${REPO_ROOT}/libexec/mcserver-kit/server-properties-tui.sh" alpha "$server_dir" >/dev/null
-  assert_equal 'TUI MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" get "${server_dir}/server.env" MOTD)" 'the TUI edits the authoritative environment value'
-  assert_equal 'Distributed MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-get "${server_dir}/data/server.properties" MOTD)" 'the data file changes only when the container applies server.env'
+  assert_equal 'TUI MOTD' "$(python3 "${REPO_ROOT}/libexec/mcserver-kit/server-config.py" property-get "${server_dir}/data/server.properties" MOTD)" 'the TUI edits the authoritative data file'
+  assert_equal 'absent' "$(! grep -q '^MOTD=' "${server_dir}/server.env" && printf absent)" 'TUI editing does not recreate environment property overrides'
 
   PATH="${fake_bin}:$PATH" MCSERVER_KIT_LANG=en MCSERVER_KIT_CONFIG="$config_file" \
     MCSERVER_KIT_TEST_EXPLORER_LOG="${temp_dir}/property-import/explorer.log" \
@@ -950,12 +1342,18 @@ WHIPTAIL
 }
 
 main() {
+  PYTHONDONTWRITEBYTECODE=1 python3 "${REPO_ROOT}/tests/test-tui-progress.py"
+  PYTHONDONTWRITEBYTECODE=1 python3 "${REPO_ROOT}/tests/test-tui-session.py"
   TEST_TEMP_DIR="$(mktemp -d)"
   trap cleanup EXIT
+
+  python3 "${REPO_ROOT}/tests/test-properties-initialization.py"
+  python3 "${REPO_ROOT}/tests/test-properties-tui.py"
 
   test_version_resolution
   test_locales
   test_locale_fallback
+  test_server_raw_listing "$TEST_TEMP_DIR"
   test_installer_version_selection
   test_update_check "$TEST_TEMP_DIR"
   test_setup_gate "$TEST_TEMP_DIR"
@@ -970,9 +1368,13 @@ main() {
   test_config_value_editor "$TEST_TEMP_DIR"
   test_compose_state_parser
   test_server_management "$TEST_TEMP_DIR"
+  test_properties_source_migration_and_cli "$TEST_TEMP_DIR"
+  test_server_deletion "$TEST_TEMP_DIR"
+  test_home_server_deletion "$TEST_TEMP_DIR"
   test_server_property_editor "$TEST_TEMP_DIR"
   test_property_import_and_explorer "$TEST_TEMP_DIR"
   test_home_dashboard "$TEST_TEMP_DIR"
+  test_home_background_update "$TEST_TEMP_DIR"
   test_home_screen_transition_after_current_update "$TEST_TEMP_DIR"
 
   printf 'PASS: %d specification tests, %d skipped\n' "$tests_run" "$tests_skipped"

@@ -107,6 +107,15 @@ check_for_update() {
   fi
 }
 
+cached_update_only() {
+  local latest
+  # The dashboard must not wait for a network request when the cache expires.
+  latest="$(read_cached_tag)" || return 0
+  if update_available "$latest"; then
+    printf '%s\n' "$latest"
+  fi
+}
+
 install_update() {
   local assume_yes="$1" latest current answer=''
   current="$(normalized_current_tag)"
@@ -147,6 +156,9 @@ main() {
       ;;
     --cached-quiet)
       check_for_update true true
+      ;;
+    --cached-only-quiet)
+      cached_update_only
       ;;
     '')
       install_update false
